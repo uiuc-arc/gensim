@@ -5,7 +5,7 @@ Tests to check DTM math functions and Topic-Word, Doc-Topic proportions.
 """
 import unittest
 import logging
-
+import numpy.testing as npt
 import numpy as np  # for arrays, array broadcasting etc.
 from gensim.models import ldaseqmodel
 from gensim.corpora import Dictionary
@@ -235,7 +235,8 @@ class TestLdaSeq(unittest.TestCase):
 
         # and test it on a predefined document
         topics = model[test_doc]
-        self.assertTrue(np.allclose(expected_topics, topics))
+        npt.assert_allclose(expected_topics, topics, rtol=1e-05, atol=1e-08)
+        #self.assertTrue(np.allclose(expected_topics, topics))
 
 
 if __name__ == '__main__':
