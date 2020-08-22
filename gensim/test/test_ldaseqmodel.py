@@ -199,17 +199,17 @@ class TestLdaSeq(unittest.TestCase):
             ['bank', 'loan', 'sell']
         ]
         # initializing using own LDA sufficient statistics so that we get same results each time.
-        sstats = np.loadtxt(datapath('DTM/sstats_test.txt'))
-        dictionary = Dictionary(texts)
-        corpus = [dictionary.doc2bow(text) for text in texts]
-        self.ldaseq = ldaseqmodel.LdaSeqModel(
-            corpus=corpus, id2word=dictionary, num_topics=2,
-            time_slice=[10, 10, 11], initialize='own', sstats=sstats,
-            passes=2, lda_inference_max_iter=10, em_min_iter=1, em_max_iter=4
-        )
+        self.sstats = np.loadtxt(datapath('DTM/sstats_test.txt'))
+        self.dictionary = Dictionary(texts)
+        self.corpus = [self.dictionary.doc2bow(text) for text in texts]
 
     # testing topic word proportions
     def testTopicWord(self):
+        self.ldaseq = ldaseqmodel.LdaSeqModel(
+            corpus=self.corpus, id2word=self.dictionary, num_topics=2,
+            time_slice=[10, 10, 11], initialize='own', sstats=self.sstats,
+            passes=2, lda_inference_max_iter=10, em_min_iter=1, em_max_iter=4
+        )
 
         topics = self.ldaseq.print_topics(0)
         expected_topic_word = [('skills', 0.035999999999999997)]
@@ -218,11 +218,21 @@ class TestLdaSeq(unittest.TestCase):
 
     # testing document-topic proportions
     def testDocTopic(self):
+        self.ldaseq = ldaseqmodel.LdaSeqModel(
+            corpus=self.corpus, id2word=self.dictionary, num_topics=2,
+            time_slice=[10, 10, 11], initialize='own', sstats=self.sstats,
+            passes=2, lda_inference_max_iter=1, em_min_iter=1, em_max_iter=4
+        )
         doc_topic = self.ldaseq.doc_topics(0)
         expected_doc_topic = 0.00066577896138482028
         self.assertAlmostEqual(doc_topic[0], expected_doc_topic, places=2)
 
     def testDtypeBackwardCompatibility(self):
+        self.ldaseq = ldaseqmodel.LdaSeqModel(
+            corpus=self.corpus, id2word=self.dictionary, num_topics=2,
+            time_slice=[10, 10, 11], initialize='own', sstats=self.sstats,
+            passes=2, lda_inference_max_iter=2, em_min_iter=1, em_max_iter=4
+        )
         ldaseq_3_0_1_fname = datapath('DTM/ldaseq_3_0_1_model')
         test_doc = [(547, 1), (549, 1), (552, 1), (555, 1)]
         expected_topics = [0.99751244, 0.00248756]

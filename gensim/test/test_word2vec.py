@@ -769,7 +769,7 @@ class TestWord2VecModel(unittest.TestCase):
 
     def testParallel(self):
         """Test word2vec parallel training."""
-        corpus = utils.RepeatCorpus(LeeCorpus(), 10000)  # repeats about 33 times
+        corpus = utils.RepeatCorpus(LeeCorpus(), 1100)  # repeats about 33 times
 
         for workers in [4, ]:  # [4, 2]
             model = word2vec.Word2Vec(corpus, vector_size=16, min_count=(10 * 33), workers=workers)

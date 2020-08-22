@@ -301,14 +301,20 @@ phrases_w_common_terms = [
 
 
 class TestLdaWrapper(unittest.TestCase):
-    def setUp(self):
-        numpy.random.seed(0)  # set fixed seed to get similar values everytime
-        self.model = LdaTransformer(
-            id2word=dictionary, num_topics=2, passes=100, minimum_probability=0, random_state=numpy.random.seed(0)
-        )
-        self.model.fit(corpus)
+    # def setUp(self):
+    #     numpy.random.seed(0)  # set fixed seed to get similar values everytime
+    #     self.model = LdaTransformer(
+    #         id2word=dictionary, num_topics=2, passes=100, minimum_probability=0, random_state=numpy.random.seed(0)
+    #     )
+    #     self.model.fit(corpus)
 
     def testTransform(self):
+        corpus = [dictionary.doc2bow(text) for text in texts]
+        numpy.random.seed(0)  # set fixed seed to get similar values everytime
+        self.model = LdaTransformer(
+            id2word=dictionary, num_topics=2, passes=2, minimum_probability=0, random_state=numpy.random.seed(0)
+        )
+        self.model.fit(corpus)
         texts_new = ['graph', 'eulerian']
         bow = self.model.id2word.doc2bow(texts_new)
         matrix = self.model.transform(bow)
@@ -323,6 +329,12 @@ class TestLdaWrapper(unittest.TestCase):
         self.assertEqual(matrix.shape[1], self.model.num_topics)
 
     def testPartialFit(self):
+        corpus = [dictionary.doc2bow(text) for text in texts]
+        numpy.random.seed(0)  # set fixed seed to get similar values everytime
+        self.model = LdaTransformer(
+            id2word=dictionary, num_topics=2, passes=100, minimum_probability=0, random_state=numpy.random.seed(0)
+        )
+        self.model.fit(corpus)
         for i in range(10):
             self.model.partial_fit(X=corpus)  # fit against the model again
         doc = list(corpus)[0]  # transform only the first document
@@ -333,6 +345,7 @@ class TestLdaWrapper(unittest.TestCase):
 
     def testConsistencyWithGensimModel(self):
         # training an LdaTransformer with `num_topics`=10
+        corpus = [dictionary.doc2bow(text) for text in texts]
         self.model = LdaTransformer(
             id2word=dictionary, num_topics=10, passes=100, minimum_probability=0, random_state=numpy.random.seed(0)
         )
@@ -366,6 +379,12 @@ class TestLdaWrapper(unittest.TestCase):
         self.assertTrue(passed)
 
     def testPipeline(self):
+        corpus = [dictionary.doc2bow(text) for text in texts]
+        numpy.random.seed(0)  # set fixed seed to get similar values everytime
+        self.model = LdaTransformer(
+            id2word=dictionary, num_topics=2, passes=1, minimum_probability=0, random_state=numpy.random.seed(0)
+        )
+        self.model.fit(corpus)
         model = LdaTransformer(num_topics=2, passes=10, minimum_probability=0, random_state=numpy.random.seed(0))
         with open(datapath('mini_newsgroup'), 'rb') as f:
             compressed_content = f.read()
@@ -382,6 +401,12 @@ class TestLdaWrapper(unittest.TestCase):
         self.assertGreaterEqual(score, 0.40)
 
     def testSetGetParams(self):
+        corpus = [dictionary.doc2bow(text) for text in texts]
+        numpy.random.seed(0)  # set fixed seed to get similar values everytime
+        self.model = LdaTransformer(
+            id2word=dictionary, num_topics=2, passes=1, minimum_probability=0, random_state=numpy.random.seed(0)
+        )
+        self.model.fit(corpus)
         # updating only one param
         self.model.set_params(num_topics=3)
         model_params = self.model.get_params()
@@ -402,6 +427,12 @@ class TestLdaWrapper(unittest.TestCase):
         self.assertEqual(getattr(self.model.gensim_model, 'decay'), 0.7)
 
     def testPersistence(self):
+        corpus = [dictionary.doc2bow(text) for text in texts]
+        numpy.random.seed(0)  # set fixed seed to get similar values everytime
+        self.model = LdaTransformer(
+            id2word=dictionary, num_topics=2, passes=100, minimum_probability=0, random_state=numpy.random.seed(0)
+        )
+        self.model.fit(corpus)
         model_dump = pickle.dumps(self.model)
         model_load = pickle.loads(model_dump)
 
@@ -520,14 +551,19 @@ class TestLsiWrapper(unittest.TestCase):
 
 
 class TestLdaSeqWrapper(unittest.TestCase):
-    def setUp(self):
-        self.model = LdaSeqTransformer(
-            id2word=dictionary_ldaseq, num_topics=2, time_slice=[10, 10, 11], initialize='gensim',
-            passes=2, lda_inference_max_iter=10, em_min_iter=1, em_max_iter=4
-        )
-        self.model.fit(corpus_ldaseq)
+    # def setUp(self):
+    #     self.model = LdaSeqTransformer(
+    #         id2word=dictionary_ldaseq, num_topics=2, time_slice=[10, 10, 11], initialize='gensim',
+    #         passes=2, lda_inference_max_iter=10, em_min_iter=1, em_max_iter=4
+    #     )
+    #     self.model.fit(corpus_ldaseq)
 
     def testTransform(self):
+        self.model = LdaSeqTransformer(
+            id2word=dictionary_ldaseq, num_topics=2, time_slice=[10, 10, 11], initialize='gensim',
+            passes=2, lda_inference_max_iter=1, em_min_iter=1, em_max_iter=4
+        )
+        self.model.fit(corpus_ldaseq)
         # transforming two documents
         docs = [list(corpus_ldaseq)[0], list(corpus_ldaseq)[1]]
         transformed_vecs = self.model.transform(docs)
@@ -541,6 +577,11 @@ class TestLdaSeqWrapper(unittest.TestCase):
         self.assertEqual(transformed_vecs.shape[1], self.model.num_topics)
 
     def testPipeline(self):
+        self.model = LdaSeqTransformer(
+            id2word=dictionary_ldaseq, num_topics=2, time_slice=[10, 10, 11], initialize='gensim',
+            passes=2, lda_inference_max_iter=2, em_min_iter=1, em_max_iter=4
+        )
+        self.model.fit(corpus_ldaseq)
         numpy.random.seed(0)  # set fixed seed to get similar values everytime
         with open(datapath('mini_newsgroup'), 'rb') as f:
             compressed_content = f.read()
@@ -562,6 +603,11 @@ class TestLdaSeqWrapper(unittest.TestCase):
         self.assertGreater(score, 0.50)
 
     def testSetGetParams(self):
+        self.model = LdaSeqTransformer(
+            id2word=dictionary_ldaseq, num_topics=2, time_slice=[10, 10, 11], initialize='gensim',
+            passes=2, lda_inference_max_iter=1, em_min_iter=1, em_max_iter=4
+        )
+        self.model.fit(corpus_ldaseq)
         # updating only one param
         self.model.set_params(num_topics=3)
         model_params = self.model.get_params()
