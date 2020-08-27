@@ -28,6 +28,7 @@ from gensim.models import Word2Vec, FastText
 from gensim.test.utils import (datapath, get_tmpfile,
     common_texts as texts, common_dictionary as dictionary, common_corpus as corpus)
 from gensim.similarities import UniformTermSimilarityIndex
+from gensim.similarities import WordEmbeddingSimilarityIndex
 from gensim.similarities import SparseTermSimilarityMatrix
 from gensim.similarities import LevenshteinSimilarityIndex
 from gensim.similarities.docsim import _nlargest
@@ -301,7 +302,7 @@ class TestMatrixSimilarity(unittest.TestCase, _TestSimilarityABC):
 class TestWmdSimilarity(unittest.TestCase, _TestSimilarityABC):
     def setUp(self):
         self.cls = similarities.WmdSimilarity
-        self.w2v_model = Word2Vec(texts, min_count=1)
+        self.w2v_model = Word2Vec(texts, min_count=1).wv
 
     def factoryMethod(self):
         # Override factoryMethod.
@@ -552,11 +553,10 @@ class TestWord2VecAnnoyIndexer(unittest.TestCase):
 
     def testWord2Vec(self):
         model = word2vec.Word2Vec(texts, min_count=1)
-        model.init_sims()
         index = self.indexer(model, 10)
 
         self.assertVectorIsSimilarToItself(model.wv, index)
-        self.assertApproxNeighborsMatchExact(model, model.wv, index)
+        self.assertApproxNeighborsMatchExact(model.wv, model.wv, index)
         self.assertIndexSaved(index)
         self.assertLoadedIndexEqual(index, model)
 
@@ -571,11 +571,10 @@ class TestWord2VecAnnoyIndexer(unittest.TestCase):
                         yield line.lower().strip().split()
 
         model = FastText(LeeReader(datapath('lee.cor')), bucket=5000)
-        model.init_sims()
         index = self.indexer(model, 10)
 
         self.assertVectorIsSimilarToItself(model.wv, index)
-        self.assertApproxNeighborsMatchExact(model, model.wv, index)
+        self.assertApproxNeighborsMatchExact(model.wv, model.wv, index)
         self.assertIndexSaved(index)
         self.assertLoadedIndexEqual(index, model)
 
@@ -606,8 +605,8 @@ class TestWord2VecAnnoyIndexer(unittest.TestCase):
 
     def assertApproxNeighborsMatchExact(self, model, wv, index):
         vector = wv.vectors_norm[0]
-        approx_neighbors = model.wv.most_similar([vector], topn=5, indexer=index)
-        exact_neighbors = model.wv.most_similar(positive=[vector], topn=5)
+        approx_neighbors = model.most_similar([vector], topn=5, indexer=index)
+        exact_neighbors = model.most_similar(positive=[vector], topn=5)
 
         approx_words = [neighbor[0] for neighbor in approx_neighbors]
         exact_words = [neighbor[0] for neighbor in exact_neighbors]
@@ -616,11 +615,11 @@ class TestWord2VecAnnoyIndexer(unittest.TestCase):
 
     def assertAllSimilaritiesDisableIndexer(self, model, wv, index):
         vector = wv.vectors_norm[0]
-        approx_similarities = model.wv.most_similar([vector], topn=None, indexer=index)
-        exact_similarities = model.wv.most_similar(positive=[vector], topn=None)
+        approx_similarities = model.most_similar([vector], topn=None, indexer=index)
+        exact_similarities = model.most_similar(positive=[vector], topn=None)
 
         self.assertEqual(approx_similarities, exact_similarities)
-        self.assertEqual(len(approx_similarities), len(wv.vectors.vocab))
+        self.assertEqual(len(approx_similarities), len(wv.vectors))
 
     def assertIndexSaved(self, index):
         fname = get_tmpfile('gensim_similarities.tst.pkl')
@@ -654,9 +653,8 @@ class TestDoc2VecAnnoyIndexer(unittest.TestCase):
         from gensim.similarities.index import AnnoyIndexer
 
         self.model = doc2vec.Doc2Vec(sentences, min_count=1)
-        self.model.init_sims()
         self.index = AnnoyIndexer(self.model, 300)
-        self.vector = self.model.docvecs.vectors_docs_norm[0]
+        self.vector = self.model.dv.vectors_norm[0]
 
     def testDocumentIsSimilarToItself(self):
         approx_neighbors = self.index.most_similar(self.vector, 1)
@@ -666,8 +664,8 @@ class TestDoc2VecAnnoyIndexer(unittest.TestCase):
         self.assertAlmostEqual(similarity, 1.0, places=2)
 
     def testApproxNeighborsMatchExact(self):
-        approx_neighbors = self.model.docvecs.most_similar([self.vector], topn=5, indexer=self.index)
-        exact_neighbors = self.model.docvecs.most_similar(
+        approx_neighbors = self.model.dv.most_similar([self.vector], topn=5, indexer=self.index)
+        exact_neighbors = self.model.dv.most_similar(
             positive=[self.vector], topn=5)
 
         approx_words = [neighbor[0] for neighbor in approx_neighbors]
@@ -715,11 +713,10 @@ class TestWord2VecNmslibIndexer(unittest.TestCase):
 
     def test_word2vec(self):
         model = word2vec.Word2Vec(texts, min_count=1)
-        model.init_sims()
         index = self.indexer(model)
 
         self.assertVectorIsSimilarToItself(model.wv, index)
-        self.assertApproxNeighborsMatchExact(model, model.wv, index)
+        self.assertApproxNeighborsMatchExact(model.wv, model.wv, index)
         self.assertIndexSaved(index)
         self.assertLoadedIndexEqual(index, model)
 
@@ -734,11 +731,10 @@ class TestWord2VecNmslibIndexer(unittest.TestCase):
                         yield line.lower().strip().split()
 
         model = FastText(LeeReader(datapath('lee.cor')), bucket=5000)
-        model.init_sims()
         index = self.indexer(model)
 
         self.assertVectorIsSimilarToItself(model.wv, index)
-        self.assertApproxNeighborsMatchExact(model, model.wv, index)
+        self.assertApproxNeighborsMatchExact(model.wv, model.wv, index)
         self.assertIndexSaved(index)
         self.assertLoadedIndexEqual(index, model)
 
@@ -767,8 +763,8 @@ class TestWord2VecNmslibIndexer(unittest.TestCase):
 
     def assertApproxNeighborsMatchExact(self, model, wv, index):
         vector = wv.vectors_norm[0]
-        approx_neighbors = model.wv.most_similar([vector], topn=5, indexer=index)
-        exact_neighbors = model.wv.most_similar(positive=[vector], topn=5)
+        approx_neighbors = model.most_similar([vector], topn=5, indexer=index)
+        exact_neighbors = model.most_similar(positive=[vector], topn=5)
 
         approx_words = [neighbor[0] for neighbor in approx_neighbors]
         exact_words = [neighbor[0] for neighbor in exact_neighbors]
@@ -806,9 +802,8 @@ class TestDoc2VecNmslibIndexer(unittest.TestCase):
         from gensim.similarities.nmslib import NmslibIndexer
 
         self.model = doc2vec.Doc2Vec(sentences, min_count=1)
-        self.model.init_sims()
         self.index = NmslibIndexer(self.model)
-        self.vector = self.model.docvecs.vectors_docs_norm[0]
+        self.vector = self.model.dv.vectors_norm[0]
 
     def test_document_is_similar_to_itself(self):
         approx_neighbors = self.index.most_similar(self.vector, 1)
@@ -818,8 +813,8 @@ class TestDoc2VecNmslibIndexer(unittest.TestCase):
         self.assertAlmostEqual(similarity, 1.0, places=2)
 
     def test_approx_neighbors_match_exact(self):
-        approx_neighbors = self.model.docvecs.most_similar([self.vector], topn=5, indexer=self.index)
-        exact_neighbors = self.model.docvecs.most_similar(
+        approx_neighbors = self.model.dv.most_similar([self.vector], topn=5, indexer=self.index)
+        exact_neighbors = self.model.dv.most_similar(
             positive=[self.vector], topn=5)
 
         approx_words = [neighbor[0] for neighbor in approx_neighbors]
@@ -888,7 +883,12 @@ class TestSparseTermSimilarityMatrix(unittest.TestCase):
             [u"government", u"denied", u"holiday", u"slowing", u"hollingworth"]]
         self.dictionary = Dictionary(self.documents)
         self.tfidf = TfidfModel(dictionary=self.dictionary)
+        zero_index = UniformTermSimilarityIndex(self.dictionary, term_similarity=0.0)
         self.index = UniformTermSimilarityIndex(self.dictionary, term_similarity=0.5)
+        self.identity_matrix = SparseTermSimilarityMatrix(zero_index, self.dictionary)
+        self.uniform_matrix = SparseTermSimilarityMatrix(self.index, self.dictionary)
+        self.vec1 = self.dictionary.doc2bow([u"government", u"government", u"denied"])
+        self.vec2 = self.dictionary.doc2bow([u"government", u"holiday"])
 
     def test_type(self):
         """Test the type of the produced matrix."""
@@ -949,6 +949,29 @@ class TestSparseTermSimilarityMatrix(unittest.TestCase):
         expected_matrix = numpy.array([
             [1.0, 0.5, 0.5, 0.5, 0.5],
             [0.5, 1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 1.0]])
+        self.assertTrue(numpy.all(expected_matrix == matrix))
+
+    def test_dominant(self):
+        """Test the dominant parameter of the matrix constructor."""
+        negative_index = UniformTermSimilarityIndex(self.dictionary, term_similarity=-0.5)
+        matrix = SparseTermSimilarityMatrix(
+            negative_index, self.dictionary, nonzero_limit=2).matrix.todense()
+        expected_matrix = numpy.array([
+            [1.0, -.5, -.5, 0.0, 0.0],
+            [-.5, 1.0, 0.0, -.5, 0.0],
+            [-.5, 0.0, 1.0, 0.0, 0.0],
+            [0.0, -.5, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 1.0]])
+        self.assertTrue(numpy.all(expected_matrix == matrix))
+
+        matrix = SparseTermSimilarityMatrix(
+            negative_index, self.dictionary, nonzero_limit=2, dominant=True).matrix.todense()
+        expected_matrix = numpy.array([
+            [1.0, -.5, 0.0, 0.0, 0.0],
+            [-.5, 1.0, 0.0, 0.0, 0.0],
             [0.0, 0.0, 1.0, 0.0, 0.0],
             [0.0, 0.0, 0.0, 1.0, 0.0],
             [0.0, 0.0, 0.0, 0.0, 1.0]])
@@ -1016,109 +1039,340 @@ class TestSparseTermSimilarityMatrix(unittest.TestCase):
         self.assertTrue(isinstance(matrix, scipy.sparse.csc_matrix))
         self.assertTrue(numpy.all(matrix.todense() == expected_matrix))
 
-    def test_inner_product(self):
-        """Test the inner product."""
+    def test_inner_product_vector_zerovector(self):
+        """Test the inner product between a vector and a zero vector."""
 
-        matrix = SparseTermSimilarityMatrix(
-            UniformTermSimilarityIndex(self.dictionary, term_similarity=0.5), self.dictionary)
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], self.vec2))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product(self.vec1, []))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], []))
 
-        # check zero vectors work as expected
-        vec1 = self.dictionary.doc2bow([u"government", u"government", u"denied"])
-        vec2 = self.dictionary.doc2bow([u"government", u"holiday"])
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], self.vec2, normalized=(False, 'maintain')))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product(self.vec1, [], normalized=(False, 'maintain')))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], [], normalized=(False, 'maintain')))
 
-        self.assertEqual(0.0, matrix.inner_product([], vec2))
-        self.assertEqual(0.0, matrix.inner_product(vec1, []))
-        self.assertEqual(0.0, matrix.inner_product([], []))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], self.vec2, normalized=(False, True)))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product(self.vec1, [], normalized=(False, True)))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], [], normalized=(False, True)))
 
-        self.assertEqual(0.0, matrix.inner_product([], vec2, normalized=True))
-        self.assertEqual(0.0, matrix.inner_product(vec1, [], normalized=True))
-        self.assertEqual(0.0, matrix.inner_product([], [], normalized=True))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], self.vec2, normalized=('maintain', False)))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product(self.vec1, [], normalized=('maintain', False)))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], [], normalized=('maintain', False)))
 
-        # check that real-world vectors work as expected
-        vec1 = self.dictionary.doc2bow([u"government", u"government", u"denied"])
-        vec2 = self.dictionary.doc2bow([u"government", u"holiday"])
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], self.vec2, normalized=('maintain', 'maintain')))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product(self.vec1, [], normalized=('maintain', 'maintain')))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], [], normalized=('maintain', 'maintain')))
+
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], self.vec2, normalized=('maintain', True)))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product(self.vec1, [], normalized=('maintain', True)))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], [], normalized=('maintain', True)))
+
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], self.vec2, normalized=(True, False)))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product(self.vec1, [], normalized=(True, False)))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], [], normalized=(True, False)))
+
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], self.vec2, normalized=(True, 'maintain')))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product(self.vec1, [], normalized=(True, 'maintain')))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], [], normalized=(True, 'maintain')))
+
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], self.vec2, normalized=(True, True)))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product(self.vec1, [], normalized=(True, True)))
+        self.assertEqual(0.0, self.uniform_matrix.inner_product([], [], normalized=(True, True)))
+
+    def test_inner_product_vector_vector(self):
+        """Test the inner product between two vectors."""
+
         expected_result = 0.0
         expected_result += 2 * 1.0 * 1  # government * s_{ij} * government
         expected_result += 2 * 0.5 * 1  # government * s_{ij} * holiday
         expected_result += 1 * 0.5 * 1  # denied * s_{ij} * government
         expected_result += 1 * 0.5 * 1  # denied * s_{ij} * holiday
-        result = matrix.inner_product(vec1, vec2)
+        result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
         self.assertAlmostEqual(expected_result, result, places=5)
 
-        vec1 = self.dictionary.doc2bow([u"government", u"government", u"denied"])
-        vec2 = self.dictionary.doc2bow([u"government", u"holiday"])
-        expected_result = matrix.inner_product(vec1, vec2)
-        expected_result /= math.sqrt(matrix.inner_product(vec1, vec1))
-        expected_result /= math.sqrt(matrix.inner_product(vec2, vec2))
-        result = matrix.inner_product(vec1, vec2, normalized=True)
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec2, self.vec2))
+        result = self.uniform_matrix.inner_product(self.vec1, self.vec2, normalized=(False, 'maintain'))
         self.assertAlmostEqual(expected_result, result, places=5)
 
-        # check that real-world (vector, corpus) pairs work as expected
-        vec1 = self.dictionary.doc2bow([u"government", u"government", u"denied"])
-        vec2 = self.dictionary.doc2bow([u"government", u"holiday"])
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        result = self.uniform_matrix.inner_product(self.vec1, self.vec2, normalized=(False, True))
+        self.assertAlmostEqual(expected_result, result, places=5)
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec1, self.vec1))
+        result = self.uniform_matrix.inner_product(self.vec1, self.vec2, normalized=('maintain', False))
+        self.assertAlmostEqual(expected_result, result, places=5)
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec1, self.vec1))
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec2, self.vec2))
+        result = self.uniform_matrix.inner_product(self.vec1, self.vec2, normalized=('maintain', 'maintain'))
+        self.assertAlmostEqual(expected_result, result, places=5)
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec1, self.vec1))
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        result = self.uniform_matrix.inner_product(self.vec1, self.vec2, normalized=('maintain', True))
+        self.assertAlmostEqual(expected_result, result, places=5)
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        result = self.uniform_matrix.inner_product(self.vec1, self.vec2, normalized=(True, False))
+        self.assertAlmostEqual(expected_result, result, places=5)
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec2, self.vec2))
+        result = self.uniform_matrix.inner_product(self.vec1, self.vec2, normalized=(True, 'maintain'))
+        self.assertAlmostEqual(expected_result, result, places=5)
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        result = self.uniform_matrix.inner_product(self.vec1, self.vec2, normalized=(True, True))
+        self.assertAlmostEqual(expected_result, result, places=5)
+
+    def test_inner_product_vector_corpus(self):
+        """Test the inner product between a vector and a corpus."""
+
         expected_result = 0.0
         expected_result += 2 * 1.0 * 1  # government * s_{ij} * government
         expected_result += 2 * 0.5 * 1  # government * s_{ij} * holiday
         expected_result += 1 * 0.5 * 1  # denied * s_{ij} * government
         expected_result += 1 * 0.5 * 1  # denied * s_{ij} * holiday
         expected_result = numpy.full((1, 2), expected_result)
-        result = matrix.inner_product(vec1, [vec2] * 2)
+        result = self.uniform_matrix.inner_product(self.vec1, [self.vec2] * 2)
         self.assertTrue(isinstance(result, numpy.ndarray))
         self.assertTrue(numpy.allclose(expected_result, result))
 
-        vec1 = self.dictionary.doc2bow([u"government", u"government", u"denied"])
-        vec2 = self.dictionary.doc2bow([u"government", u"holiday"])
-        expected_result = matrix.inner_product(vec1, vec2)
-        expected_result /= math.sqrt(matrix.inner_product(vec1, vec1))
-        expected_result /= math.sqrt(matrix.inner_product(vec2, vec2))
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec2, self.vec2))
         expected_result = numpy.full((1, 2), expected_result)
-        result = matrix.inner_product(vec1, [vec2] * 2, normalized=True)
+        result = self.uniform_matrix.inner_product(self.vec1, [self.vec2] * 2, normalized=(False, 'maintain'))
         self.assertTrue(isinstance(result, numpy.ndarray))
         self.assertTrue(numpy.allclose(expected_result, result))
 
-        # check that real-world (corpus, vector) pairs work as expected
-        vec1 = self.dictionary.doc2bow([u"government", u"government", u"denied"])
-        vec2 = self.dictionary.doc2bow([u"government", u"holiday"])
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result = numpy.full((1, 2), expected_result)
+        result = self.uniform_matrix.inner_product(self.vec1, [self.vec2] * 2, normalized=(False, True))
+        self.assertTrue(isinstance(result, numpy.ndarray))
+        self.assertTrue(numpy.allclose(expected_result, result))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec1, self.vec1))
+        expected_result = numpy.full((1, 2), expected_result)
+        result = self.uniform_matrix.inner_product(self.vec1, [self.vec2] * 2, normalized=('maintain', False))
+        self.assertTrue(isinstance(result, numpy.ndarray))
+        self.assertTrue(numpy.allclose(expected_result, result))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec1, self.vec1))
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec2, self.vec2))
+        expected_result = numpy.full((1, 2), expected_result)
+        result = self.uniform_matrix.inner_product(self.vec1, [self.vec2] * 2, normalized=('maintain', 'maintain'))
+        self.assertTrue(isinstance(result, numpy.ndarray))
+        self.assertTrue(numpy.allclose(expected_result, result))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec1, self.vec1))
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result = numpy.full((1, 2), expected_result)
+        result = self.uniform_matrix.inner_product(self.vec1, [self.vec2] * 2, normalized=('maintain', True))
+        self.assertTrue(isinstance(result, numpy.ndarray))
+        self.assertTrue(numpy.allclose(expected_result, result))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result = numpy.full((1, 2), expected_result)
+        result = self.uniform_matrix.inner_product(self.vec1, [self.vec2] * 2, normalized=(True, False))
+        self.assertTrue(isinstance(result, numpy.ndarray))
+        self.assertTrue(numpy.allclose(expected_result, result))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec2, self.vec2))
+        expected_result = numpy.full((1, 2), expected_result)
+        result = self.uniform_matrix.inner_product(self.vec1, [self.vec2] * 2, normalized=(True, 'maintain'))
+        self.assertTrue(isinstance(result, numpy.ndarray))
+        self.assertTrue(numpy.allclose(expected_result, result))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result = numpy.full((1, 2), expected_result)
+        result = self.uniform_matrix.inner_product(self.vec1, [self.vec2] * 2, normalized=(True, True))
+        self.assertTrue(isinstance(result, numpy.ndarray))
+        self.assertTrue(numpy.allclose(expected_result, result))
+
+    def test_inner_product_corpus_vector(self):
+        """Test the inner product between a corpus and a vector."""
+
         expected_result = 0.0
         expected_result += 2 * 1.0 * 1  # government * s_{ij} * government
         expected_result += 2 * 0.5 * 1  # government * s_{ij} * holiday
         expected_result += 1 * 0.5 * 1  # denied * s_{ij} * government
         expected_result += 1 * 0.5 * 1  # denied * s_{ij} * holiday
         expected_result = numpy.full((3, 1), expected_result)
-        result = matrix.inner_product([vec1] * 3, vec2)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, self.vec2)
         self.assertTrue(isinstance(result, numpy.ndarray))
         self.assertTrue(numpy.allclose(expected_result, result))
 
-        vec1 = self.dictionary.doc2bow([u"government", u"government", u"denied"])
-        vec2 = self.dictionary.doc2bow([u"government", u"holiday"])
-        expected_result = matrix.inner_product(vec1, vec2)
-        expected_result /= math.sqrt(matrix.inner_product(vec1, vec1))
-        expected_result /= math.sqrt(matrix.inner_product(vec2, vec2))
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec2, self.vec2))
         expected_result = numpy.full((3, 1), expected_result)
-        result = matrix.inner_product([vec1] * 3, vec2, normalized=True)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, self.vec2, normalized=(False, 'maintain'))
         self.assertTrue(isinstance(result, numpy.ndarray))
         self.assertTrue(numpy.allclose(expected_result, result))
 
-        # check that real-world corpora work as expected
-        vec1 = self.dictionary.doc2bow([u"government", u"government", u"denied"])
-        vec2 = self.dictionary.doc2bow([u"government", u"holiday"])
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result = numpy.full((3, 1), expected_result)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, self.vec2, normalized=(False, True))
+        self.assertTrue(isinstance(result, numpy.ndarray))
+        self.assertTrue(numpy.allclose(expected_result, result))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec1, self.vec1))
+        expected_result = numpy.full((3, 1), expected_result)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, self.vec2, normalized=('maintain', False))
+        self.assertTrue(isinstance(result, numpy.ndarray))
+        self.assertTrue(numpy.allclose(expected_result, result))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec1, self.vec1))
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec2, self.vec2))
+        expected_result = numpy.full((3, 1), expected_result)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, self.vec2, normalized=('maintain', 'maintain'))
+        self.assertTrue(isinstance(result, numpy.ndarray))
+        self.assertTrue(numpy.allclose(expected_result, result))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec1, self.vec1))
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result = numpy.full((3, 1), expected_result)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, self.vec2, normalized=('maintain', True))
+        self.assertTrue(isinstance(result, numpy.ndarray))
+        self.assertTrue(numpy.allclose(expected_result, result))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result = numpy.full((3, 1), expected_result)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, self.vec2, normalized=(True, False))
+        self.assertTrue(isinstance(result, numpy.ndarray))
+        self.assertTrue(numpy.allclose(expected_result, result))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec2, self.vec2))
+        expected_result = numpy.full((3, 1), expected_result)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, self.vec2, normalized=(True, 'maintain'))
+        self.assertTrue(isinstance(result, numpy.ndarray))
+        self.assertTrue(numpy.allclose(expected_result, result))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result = numpy.full((3, 1), expected_result)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, self.vec2, normalized=(True, True))
+        self.assertTrue(isinstance(result, numpy.ndarray))
+        self.assertTrue(numpy.allclose(expected_result, result))
+
+    def test_inner_product_corpus_corpus(self):
+        """Test the inner product between two corpora."""
+
         expected_result = 0.0
         expected_result += 2 * 1.0 * 1  # government * s_{ij} * government
         expected_result += 2 * 0.5 * 1  # government * s_{ij} * holiday
         expected_result += 1 * 0.5 * 1  # denied * s_{ij} * government
         expected_result += 1 * 0.5 * 1  # denied * s_{ij} * holiday
         expected_result = numpy.full((3, 2), expected_result)
-        result = matrix.inner_product([vec1] * 3, [vec2] * 2)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, [self.vec2] * 2)
         self.assertTrue(isinstance(result, scipy.sparse.csr_matrix))
         self.assertTrue(numpy.allclose(expected_result, result.todense()))
 
-        vec1 = self.dictionary.doc2bow([u"government", u"government", u"denied"])
-        vec2 = self.dictionary.doc2bow([u"government", u"holiday"])
-        expected_result = matrix.inner_product(vec1, vec2)
-        expected_result /= math.sqrt(matrix.inner_product(vec1, vec1))
-        expected_result /= math.sqrt(matrix.inner_product(vec2, vec2))
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec2, self.vec2))
         expected_result = numpy.full((3, 2), expected_result)
-        result = matrix.inner_product([vec1] * 3, [vec2] * 2, normalized=True)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, [self.vec2] * 2, normalized=(False, 'maintain'))
+        self.assertTrue(isinstance(result, scipy.sparse.csr_matrix))
+        self.assertTrue(numpy.allclose(expected_result, result.todense()))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result = numpy.full((3, 2), expected_result)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, [self.vec2] * 2, normalized=(False, True))
+        self.assertTrue(isinstance(result, scipy.sparse.csr_matrix))
+        self.assertTrue(numpy.allclose(expected_result, result.todense()))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec1, self.vec1))
+        expected_result = numpy.full((3, 2), expected_result)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, [self.vec2] * 2, normalized=('maintain', False))
+        self.assertTrue(isinstance(result, scipy.sparse.csr_matrix))
+        self.assertTrue(numpy.allclose(expected_result, result.todense()))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec1, self.vec1))
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec2, self.vec2))
+        expected_result = numpy.full((3, 2), expected_result)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, [self.vec2] * 2, normalized=('maintain', 'maintain'))
+        self.assertTrue(isinstance(result, scipy.sparse.csr_matrix))
+        self.assertTrue(numpy.allclose(expected_result, result.todense()))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec1, self.vec1))
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result = numpy.full((3, 2), expected_result)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, [self.vec2] * 2, normalized=('maintain', True))
+        self.assertTrue(isinstance(result, scipy.sparse.csr_matrix))
+        self.assertTrue(numpy.allclose(expected_result, result.todense()))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result = numpy.full((3, 2), expected_result)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, [self.vec2] * 2, normalized=(True, False))
+        self.assertTrue(isinstance(result, scipy.sparse.csr_matrix))
+        self.assertTrue(numpy.allclose(expected_result, result.todense()))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result *= math.sqrt(self.identity_matrix.inner_product(self.vec2, self.vec2))
+        expected_result = numpy.full((3, 2), expected_result)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, [self.vec2] * 2, normalized=(True, 'maintain'))
+        self.assertTrue(isinstance(result, scipy.sparse.csr_matrix))
+        self.assertTrue(numpy.allclose(expected_result, result.todense()))
+
+        expected_result = self.uniform_matrix.inner_product(self.vec1, self.vec2)
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec1, self.vec1))
+        expected_result /= math.sqrt(self.uniform_matrix.inner_product(self.vec2, self.vec2))
+        expected_result = numpy.full((3, 2), expected_result)
+        result = self.uniform_matrix.inner_product([self.vec1] * 3, [self.vec2] * 2, normalized=(True, True))
         self.assertTrue(isinstance(result, scipy.sparse.csr_matrix))
         self.assertTrue(numpy.allclose(expected_result, result.todense()))
 
@@ -1235,6 +1489,51 @@ class TestLevenshteinSimilarityIndex(unittest.TestCase):
         index = LevenshteinSimilarityIndex(self.dictionary, alpha=1.0, beta=1.0)
         similarity_matrix = SparseTermSimilarityMatrix(index, dictionary)
         self.assertTrue(scipy.sparse.issparse(similarity_matrix.matrix))
+
+
+class TestWordEmbeddingSimilarityIndex(unittest.TestCase):
+    def setUp(self):
+        self.vectors = KeyedVectors.load_word2vec_format(
+            datapath('euclidean_vectors.bin'), binary=True, datatype=numpy.float64)
+
+    def test_most_similar(self):
+        """Test most_similar returns expected results."""
+
+        # check the handling of out-of-dictionary terms
+        index = WordEmbeddingSimilarityIndex(self.vectors)
+        self.assertLess(0, len(list(index.most_similar(u"holiday", topn=10))))
+        self.assertEqual(0, len(list(index.most_similar(u"out-of-dictionary term", topn=10))))
+
+        # check that the topn works as expected
+        index = WordEmbeddingSimilarityIndex(self.vectors)
+        results = list(index.most_similar(u"holiday", topn=10))
+        self.assertLess(0, len(results))
+        self.assertGreaterEqual(10, len(results))
+        results = list(index.most_similar(u"holiday", topn=20))
+        self.assertLess(10, len(results))
+        self.assertGreaterEqual(20, len(results))
+
+        # check that the term itself is not returned
+        index = WordEmbeddingSimilarityIndex(self.vectors)
+        terms = [term for term, similarity in index.most_similar(u"holiday", topn=len(self.vectors))]
+        self.assertFalse(u"holiday" in terms)
+
+        # check that the threshold works as expected
+        index = WordEmbeddingSimilarityIndex(self.vectors, threshold=0.0)
+        results = list(index.most_similar(u"holiday", topn=10))
+        self.assertLess(0, len(results))
+        self.assertGreaterEqual(10, len(results))
+
+        index = WordEmbeddingSimilarityIndex(self.vectors, threshold=1.0)
+        results = list(index.most_similar(u"holiday", topn=10))
+        self.assertEqual(0, len(results))
+
+        # check that the exponent works as expected
+        index = WordEmbeddingSimilarityIndex(self.vectors, exponent=1.0)
+        first_similarities = numpy.array([similarity for term, similarity in index.most_similar(u"holiday", topn=10)])
+        index = WordEmbeddingSimilarityIndex(self.vectors, exponent=2.0)
+        second_similarities = numpy.array([similarity for term, similarity in index.most_similar(u"holiday", topn=10)])
+        self.assertTrue(numpy.allclose(first_similarities**2.0, second_similarities))
 
 
 if __name__ == '__main__':
