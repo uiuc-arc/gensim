@@ -26,7 +26,6 @@ We are accepting PRs for Hacktoberfest!
 See [here](HACKTOBERFEST.md) for details.
 -->
 
-
 Features
 --------
 

@@ -79,7 +79,7 @@ from gensim.models.doc2vec import Doc2Vec
 from gensim.models.word2vec import Word2Vec
 from gensim.models.fasttext import FastText
 from gensim.models import KeyedVectors
-from gensim.models.keyedvectors import WordEmbeddingsKeyedVectors
+
 try:
     import nmslib
 except ImportError:
@@ -129,7 +129,7 @@ class NmslibIndexer(object):
                 self._build_from_doc2vec()
             elif isinstance(self.model, (Word2Vec, FastText)):
                 self._build_from_word2vec()
-            elif isinstance(self.model, (WordEmbeddingsKeyedVectors, KeyedVectors)):
+            elif isinstance(self.model, (KeyedVectors,)):
                 self._build_from_keyedvectors()
             else:
                 raise ValueError("model must be a Word2Vec, Doc2Vec, FastText or KeyedVectors instance")
@@ -181,7 +181,7 @@ class NmslibIndexer(object):
     def _build_from_word2vec(self):
         """Build an NMSLIB index using word vectors from a Word2Vec model."""
 
-        self.model.init_sims()
+        self.model.wv.init_sims()
         self._build_from_model(self.model.wv.vectors_norm, self.model.wv.index2word)
 
     def _build_from_doc2vec(self):
@@ -189,8 +189,8 @@ class NmslibIndexer(object):
 
         docvecs = self.model.docvecs
         docvecs.init_sims()
-        labels = [docvecs.index_to_doctag(i) for i in range(0, docvecs.count)]
-        self._build_from_model(docvecs.vectors_docs_norm, labels)
+        labels = [docvecs.index2key[i] for i in range(0, len(docvecs))]
+        self._build_from_model(docvecs.vectors_norm, labels)
 
     def _build_from_keyedvectors(self):
         """Build an NMSLIB index using word vectors from a KeyedVectors model."""

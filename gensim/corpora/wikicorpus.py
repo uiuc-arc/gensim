@@ -26,7 +26,10 @@ import re
 import signal
 from pickle import PicklingError
 # LXML isn't faster, so let's go with the built-in solution
-from xml.etree.ElementTree import iterparse
+try:
+    from xml.etree.cElementTree import iterparse
+except ImportError:
+    from xml.etree.ElementTree import iterparse
 
 
 from gensim import utils

@@ -25,7 +25,6 @@ c_extensions = {
     'gensim.models.word2vec_inner': 'gensim/models/word2vec_inner.c',
     'gensim.corpora._mmreader': 'gensim/corpora/_mmreader.c',
     'gensim.models.fasttext_inner': 'gensim/models/fasttext_inner.c',
-    'gensim.models._utils_any2vec': 'gensim/models/_utils_any2vec.c',
     'gensim._matutils': 'gensim/_matutils.c',
     'gensim.models.nmf_pgd': 'gensim/models/nmf_pgd.c',
 }
@@ -51,7 +50,14 @@ def make_c_ext(use_cython=False):
     for module, source in c_extensions.items():
         if use_cython:
             source = source.replace('.c', '.pyx')
-        yield Extension(module, sources=[source], language='c')
+        extra_args = []
+#        extra_args.extend(['-g', '-O0'])  # uncomment if optimization limiting crash info
+        yield Extension(
+            module,
+            sources=[source],
+            language='c',
+            extra_compile_args=extra_args,
+        )
 
 
 def make_cpp_ext(use_cython=False):
@@ -62,7 +68,7 @@ def make_cpp_ext(use_cython=False):
         extra_args.append('-std=c++11')
     elif system == 'Darwin':
         extra_args.extend(['-stdlib=libc++', '-std=c++11'])
-
+#    extra_args.extend(['-g', '-O0'])  # uncomment if optimization limiting crash info
     for module, source in cpp_extensions.items():
         if use_cython:
             source = source.replace('.cpp', '.pyx')
@@ -254,13 +260,12 @@ Copyright (c) 2009-now Radim Rehurek
 
 distributed_env = ['Pyro4 >= 4.27']
 
-win_testenv = [
+linux_testenv = [
     'pytest',
     'pytest-rerunfailures',
     'mock',
     'cython',
     'nmslib',
-    'pyemd',
     'testfixtures',
     'Morfessor==2.0.2a4',
     'python-Levenshtein >= 0.10.2',
@@ -270,8 +275,13 @@ win_testenv = [
     # See https://github.com/RaRe-Technologies/gensim/pull/2814
     # 'tensorflow',
     # 'keras',
+    'pyemd',  # see below; keep as last until appveyor issue resolved
 ]
 
+# temporarily remove pyemd to work around appveyor issues
+win_testenv = linux_testenv[:-1]
+
+#
 # This list partially duplicates requirements_docs.txt.
 # The main difference is that we don't include version pins here unless
 # absolutely necessary, whereas requirements_docs.txt includes pins for
@@ -330,6 +340,7 @@ install_requires = [
     'scipy >= 0.18.1',
     'six >= 1.5.0',
     'smart_open >= 1.8.1',
+    "dataclasses; python_version < '3.7'",
 ]
 
 setup_requires = [NUMPY_STR]
@@ -371,11 +382,11 @@ setup(
         'Intended Audience :: Science/Research',
         'License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)',
         'Operating System :: OS Independent',
+        'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
-        'Programming Language :: Python :: 3 :: Only',
         'Topic :: Scientific/Engineering :: Artificial Intelligence',
         'Topic :: Scientific/Engineering :: Information Analysis',
         'Topic :: Text Processing :: Linguistic',
