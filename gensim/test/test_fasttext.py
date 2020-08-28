@@ -16,11 +16,12 @@ import numpy as np
 
 from gensim import utils
 from gensim.models.word2vec import LineSentence
-from gensim.models.fasttext import FastText as FT_gensim, FastTextKeyedVectors, _unpack
+from gensim.models.fasttext import FastText as FT_gensim, FastTextKeyedVectors
 from gensim.models.keyedvectors import KeyedVectors
 from gensim.test.utils import datapath, get_tmpfile, temporary_file, common_texts as sentences
 import gensim.models._fasttext_bin
-from gensim.models.fasttext_inner import compute_ngrams, compute_ngrams_bytes, ft_hash_bytes
+from gensim.models.fasttext_inner import compute_ngrams, compute_ngrams_bytes, ft_hash_broken, ft_hash_bytes
+from gensim.models.fasttext import _unpack, _unpack_copy
 
 import gensim.models.fasttext
 
@@ -37,7 +38,7 @@ MAX_WORDVEC_COMPONENT_DIFFERENCE = 1.0e-10
 
 # Limit the size of FastText ngram buckets, for RAM reasons.
 # See https://github.com/RaRe-Technologies/gensim/issues/2790
-BUCKET = 10000
+BUCKET = 5000
 
 FT_HOME = os.environ.get("FT_HOME")
 FT_CMD = os.path.join(FT_HOME, "fasttext") if FT_HOME else None
@@ -78,13 +79,13 @@ class TestFastTextModel(unittest.TestCase):
         sims = model.wv.most_similar('graph', topn=10)
 
         self.assertEqual(model.wv.vectors.shape, (12, 12))
-        self.assertEqual(len(model.wv), 12)
+        self.assertEqual(len(model.wv.vocab), 12)
         self.assertEqual(model.wv.vectors_vocab.shape[1], 12)
         self.assertEqual(model.wv.vectors_ngrams.shape[1], 12)
         self.model_sanity(model)
 
         # test querying for "most similar" by vector
-        graph_vector = model.wv.get_vector('graph', use_norm=True)
+        graph_vector = model.wv.vectors_norm[model.wv.vocab['graph'].index]
         sims2 = model.wv.most_similar(positive=[graph_vector], topn=11)
         sims2 = [(w, sim) for w, sim in sims2 if w != 'graph']  # ignore 'graph' itself
         self.assertEqual(sims, sims2)
@@ -101,7 +102,6 @@ class TestFastTextModel(unittest.TestCase):
         self.assertEqual(len(oov_vec), 12)
 
     def testFastTextTrainParameters(self):
-
         model = FT_gensim(vector_size=12, min_count=1, hs=1, negative=0, seed=42, workers=1, bucket=BUCKET)
         model.build_vocab(corpus_iterable=sentences)
 
@@ -123,13 +123,13 @@ class TestFastTextModel(unittest.TestCase):
             sims = model.wv.most_similar('graph', topn=10)
 
             self.assertEqual(model.wv.vectors.shape, (12, 12))
-            self.assertEqual(len(model.wv), 12)
+            self.assertEqual(len(model.wv.vocab), 12)
             self.assertEqual(model.wv.vectors_vocab.shape[1], 12)
             self.assertEqual(model.wv.vectors_ngrams.shape[1], 12)
             self.model_sanity(model)
 
             # test querying for "most similar" by vector
-            graph_vector = model.wv.get_vector('graph', use_norm=True)
+            graph_vector = model.wv.vectors_norm[model.wv.vocab['graph'].index]
             sims2 = model.wv.most_similar(positive=[graph_vector], topn=11)
             sims2 = [(w, sim) for w, sim in sims2 if w != 'graph']  # ignore 'graph' itself
             self.assertEqual(sims, sims2)
@@ -142,7 +142,7 @@ class TestFastTextModel(unittest.TestCase):
             self.assertEqual(len(oov_vec), 12)
 
     def models_equal(self, model, model2):
-        self.assertEqual(len(model.wv), len(model2.wv))
+        self.assertEqual(len(model.wv.vocab), len(model2.wv.vocab))
         self.assertEqual(model.wv.bucket, model2.wv.bucket)
         self.assertTrue(np.allclose(model.wv.vectors_vocab, model2.wv.vectors_vocab))
         self.assertTrue(np.allclose(model.wv.vectors_ngrams, model2.wv.vectors_ngrams))
@@ -151,7 +151,7 @@ class TestFastTextModel(unittest.TestCase):
             self.assertTrue(np.allclose(model.syn1, model2.syn1))
         if model.negative:
             self.assertTrue(np.allclose(model.syn1neg, model2.syn1neg))
-        most_common_word = max(model.wv.key_to_index, key=lambda word: model.wv.get_vecattr(word, 'count'))[0]
+        most_common_word = max(model.wv.vocab.items(), key=lambda item: item[1].count)[0]
         self.assertTrue(np.allclose(model.wv[most_common_word], model2.wv[most_common_word]))
 
     def test_persistence(self):
@@ -164,7 +164,7 @@ class TestFastTextModel(unittest.TestCase):
         wv.save(tmpf)
         loaded_wv = FastTextKeyedVectors.load(tmpf)
         self.assertTrue(np.allclose(wv.vectors_ngrams, loaded_wv.vectors_ngrams))
-        self.assertEqual(len(wv), len(loaded_wv))
+        self.assertEqual(len(wv.vocab), len(loaded_wv.vocab))
 
     def test_persistence_fromfile(self):
         with temporary_file(get_tmpfile('gensim_fasttext1.tst')) as corpus_file:
@@ -179,26 +179,25 @@ class TestFastTextModel(unittest.TestCase):
             wv.save(tmpf)
             loaded_wv = FastTextKeyedVectors.load(tmpf)
             self.assertTrue(np.allclose(wv.vectors_ngrams, loaded_wv.vectors_ngrams))
-            self.assertEqual(len(wv), len(loaded_wv))
+            self.assertEqual(len(wv.vocab), len(loaded_wv.vocab))
+
+    def test_norm_vectors_not_saved(self):
+        tmpf = get_tmpfile('gensim_fasttext.tst')
+        model = FT_gensim(sentences, min_count=1, bucket=BUCKET)
+        model.init_sims()
+        model.save(tmpf)
+        loaded_model = FT_gensim.load(tmpf)
+        self.assertTrue(loaded_model.wv.vectors_norm is None)
+
+        wv = model.wv
+        wv.save(tmpf)
+        loaded_kv = FastTextKeyedVectors.load(tmpf)
+        self.assertTrue(loaded_kv.vectors_norm is None)
 
     def model_sanity(self, model):
-        self.model_structural_sanity(model)
-        # TODO: add semantic tests, where appropriate
-
-    def model_structural_sanity(self, model):
-        """Check a model for basic self-consistency, necessary properties & property
-        correspondences, but no semantic tests."""
-        self.assertEqual(model.wv.vectors.shape, (len(model.wv), model.vector_size))
-        self.assertEqual(model.wv.vectors_vocab.shape, (len(model.wv), model.vector_size))
+        self.assertEqual(model.wv.vectors.shape, (len(model.wv.vocab), model.vector_size))
+        self.assertEqual(model.wv.vectors_vocab.shape, (len(model.wv.vocab), model.vector_size))
         self.assertEqual(model.wv.vectors_ngrams.shape, (model.wv.bucket, model.vector_size))
-        self.assertLessEqual(len(model.wv.vectors_ngrams_lockf), len(model.wv.vectors_ngrams))
-        self.assertLessEqual(len(model.wv.vectors_vocab_lockf), len(model.wv.index_to_key))
-        self.assertTrue(np.isfinite(model.wv.vectors_ngrams).all(), "NaN in ngrams")
-        self.assertTrue(np.isfinite(model.wv.vectors_vocab).all(), "NaN in vectors_vocab")
-        if model.negative:
-            self.assertTrue(np.isfinite(model.syn1neg).all(), "NaN in syn1neg")
-        if model.hs:
-            self.assertTrue(np.isfinite(model.syn1).all(), "NaN in syn1neg")
 
     def test_load_fasttext_format(self):
         try:
@@ -207,7 +206,7 @@ class TestFastTextModel(unittest.TestCase):
             self.fail('Unable to load FastText model from file %s: %s' % (self.test_model_file, exc))
         vocab_size, model_size = 1762, 10
         self.assertEqual(model.wv.vectors.shape, (vocab_size, model_size))
-        self.assertEqual(len(model.wv), vocab_size, model_size)
+        self.assertEqual(len(model.wv.vocab), vocab_size, model_size)
         self.assertEqual(model.wv.vectors_ngrams.shape, (model.wv.bucket, model_size))
 
         expected_vec = [
@@ -247,10 +246,10 @@ class TestFastTextModel(unittest.TestCase):
         self.assertEqual(model.epochs, 5)
         self.assertEqual(model.negative, 5)
         self.assertEqual(model.sample, 0.0001)
-        self.assertEqual(model.wv.bucket, 1000)
+        self.assertEqual(model.bucket, 1000)
         self.assertEqual(model.wv.max_n, 6)
         self.assertEqual(model.wv.min_n, 3)
-        self.assertEqual(model.wv.vectors.shape, (len(model.wv), model.vector_size))
+        self.assertEqual(model.wv.vectors.shape, (len(model.wv.vocab), model.vector_size))
         self.assertEqual(model.wv.vectors_ngrams.shape, (model.wv.bucket, model.vector_size))
 
     def test_load_fasttext_new_format(self):
@@ -260,7 +259,7 @@ class TestFastTextModel(unittest.TestCase):
             self.fail('Unable to load FastText model from file %s: %s' % (self.test_new_model_file, exc))
         vocab_size, model_size = 1763, 10
         self.assertEqual(new_model.wv.vectors.shape, (vocab_size, model_size))
-        self.assertEqual(len(new_model.wv), vocab_size, model_size)
+        self.assertEqual(len(new_model.wv.vocab), vocab_size, model_size)
         self.assertEqual(new_model.wv.vectors_ngrams.shape, (new_model.wv.bucket, model_size))
 
         expected_vec = [
@@ -300,10 +299,10 @@ class TestFastTextModel(unittest.TestCase):
         self.assertEqual(new_model.epochs, 5)
         self.assertEqual(new_model.negative, 5)
         self.assertEqual(new_model.sample, 0.0001)
-        self.assertEqual(new_model.wv.bucket, 1000)
+        self.assertEqual(new_model.bucket, 1000)
         self.assertEqual(new_model.wv.max_n, 6)
         self.assertEqual(new_model.wv.min_n, 3)
-        self.assertEqual(new_model.wv.vectors.shape, (len(new_model.wv), new_model.vector_size))
+        self.assertEqual(new_model.wv.vectors.shape, (len(new_model.wv.vocab), new_model.vector_size))
         self.assertEqual(new_model.wv.vectors_ngrams.shape, (new_model.wv.bucket, new_model.vector_size))
 
     def test_load_model_supervised(self):
@@ -379,19 +378,18 @@ class TestFastTextModel(unittest.TestCase):
 
     def test_lookup(self):
         # In vocab, sanity check
-        self.assertTrue('night' in self.test_model.wv.key_to_index)
+        self.assertTrue('night' in self.test_model.wv.vocab)
         self.assertTrue(np.allclose(self.test_model.wv['night'], self.test_model.wv[['night']]))
         # Out of vocab check
-        self.assertFalse('nights' in self.test_model.wv.key_to_index)
+        self.assertFalse('nights' in self.test_model.wv.vocab)
         self.assertTrue(np.allclose(self.test_model.wv['nights'], self.test_model.wv[['nights']]))
 
     def test_contains(self):
         # In vocab, sanity check
-        self.assertTrue('night' in self.test_model.wv.key_to_index)
+        self.assertTrue('night' in self.test_model.wv.vocab)
         self.assertTrue('night' in self.test_model.wv)
         # Out of vocab check
-        self.assertFalse(self.test_model.wv.has_index_for('nights'))
-        self.assertFalse('nights' in self.test_model.wv.key_to_index)
+        self.assertFalse('nights' in self.test_model.wv.vocab)
         self.assertTrue('nights' in self.test_model.wv)
 
     @unittest.skipIf(PYEMD_EXT is False, "pyemd not installed")
@@ -406,7 +404,7 @@ class TestFastTextModel(unittest.TestCase):
 
         model_gensim = FT_gensim(
             vector_size=48, sg=0, cbow_mean=1, alpha=0.05, window=5, hs=1, negative=0,
-            min_count=5, epochs=10, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
+            min_count=5, epochs=5, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
             sorted_vocab=1, workers=1, min_alpha=0.0, bucket=BUCKET)
 
         lee_data = LineSentence(datapath('lee_background.cor'))
@@ -428,17 +426,14 @@ class TestFastTextModel(unittest.TestCase):
             u'flights',
             u'during',
             u'comes']
-        overlaps = set(sims_gensim_words).intersection(expected_sims_words)
-        overlap_count = len(overlaps)
-        self.assertGreaterEqual(
-            overlap_count, 2,
-            "only %i overlap in expected %s & actual %s" % (overlap_count, expected_sims_words, sims_gensim_words))
+        overlap_count = len(set(sims_gensim_words).intersection(expected_sims_words))
+        self.assertGreaterEqual(overlap_count, 2)
 
     def test_cbow_hs_training_fromfile(self):
         with temporary_file(get_tmpfile('gensim_fasttext.tst')) as corpus_file:
             model_gensim = FT_gensim(
                 vector_size=48, sg=0, cbow_mean=1, alpha=0.05, window=5, hs=1, negative=0,
-                min_count=5, epochs=10, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
+                min_count=5, epochs=5, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
                 sorted_vocab=1, workers=1, min_alpha=0.0, bucket=BUCKET * 4)
 
             lee_data = LineSentence(datapath('lee_background.cor'))
@@ -464,17 +459,14 @@ class TestFastTextModel(unittest.TestCase):
                 u'flights',
                 u'during',
                 u'comes']
-            overlaps = set(sims_gensim_words).intersection(expected_sims_words)
-            overlap_count = len(overlaps)
-            self.assertGreaterEqual(
-                overlap_count, 2,
-                "only %i overlap in expected %s & actual %s" % (overlap_count, expected_sims_words, sims_gensim_words))
+            overlap_count = len(set(sims_gensim_words).intersection(expected_sims_words))
+            self.assertGreaterEqual(overlap_count, 2)
 
     def test_sg_hs_training(self):
 
         model_gensim = FT_gensim(
             vector_size=48, sg=1, cbow_mean=1, alpha=0.025, window=5, hs=1, negative=0,
-            min_count=5, epochs=10, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
+            min_count=5, epochs=5, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
             sorted_vocab=1, workers=1, min_alpha=0.0, bucket=BUCKET)
 
         lee_data = LineSentence(datapath('lee_background.cor'))
@@ -496,17 +488,14 @@ class TestFastTextModel(unittest.TestCase):
             u'manslaughter',
             u'north',
             u'flight']
-        overlaps = set(sims_gensim_words).intersection(expected_sims_words)
-        overlap_count = len(overlaps)
-        self.assertGreaterEqual(
-            overlap_count, 2,
-            "only %i overlap in expected %s & actual %s" % (overlap_count, expected_sims_words, sims_gensim_words))
+        overlap_count = len(set(sims_gensim_words).intersection(expected_sims_words))
+        self.assertGreaterEqual(overlap_count, 2)
 
     def test_sg_hs_training_fromfile(self):
         with temporary_file(get_tmpfile('gensim_fasttext.tst')) as corpus_file:
             model_gensim = FT_gensim(
                 vector_size=48, sg=1, cbow_mean=1, alpha=0.025, window=5, hs=1, negative=0,
-                min_count=5, epochs=10, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
+                min_count=5, epochs=5, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
                 sorted_vocab=1, workers=1, min_alpha=0.0, bucket=BUCKET)
 
             lee_data = LineSentence(datapath('lee_background.cor'))
@@ -532,17 +521,14 @@ class TestFastTextModel(unittest.TestCase):
                 u'manslaughter',
                 u'north',
                 u'flight']
-            overlaps = set(sims_gensim_words).intersection(expected_sims_words)
-            overlap_count = len(overlaps)
-            self.assertGreaterEqual(
-                overlap_count, 2,
-                "only %i overlap in expected %s & actual %s" % (overlap_count, expected_sims_words, sims_gensim_words))
+            overlap_count = len(set(sims_gensim_words).intersection(expected_sims_words))
+            self.assertGreaterEqual(overlap_count, 2)
 
     def test_cbow_neg_training(self):
 
         model_gensim = FT_gensim(
             vector_size=48, sg=0, cbow_mean=1, alpha=0.05, window=5, hs=0, negative=5,
-            min_count=5, epochs=10, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
+            min_count=5, epochs=5, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
             sorted_vocab=1, workers=1, min_alpha=0.0, bucket=BUCKET)
 
         lee_data = LineSentence(datapath('lee_background.cor'))
@@ -564,17 +550,14 @@ class TestFastTextModel(unittest.TestCase):
             u'remains',
             u'overnight',
             u'running']
-        overlaps = set(sims_gensim_words).intersection(expected_sims_words)
-        overlap_count = len(overlaps)
-        self.assertGreaterEqual(
-            overlap_count, 2,
-            "only %i overlap in expected %s & actual %s" % (overlap_count, expected_sims_words, sims_gensim_words))
+        overlap_count = len(set(sims_gensim_words).intersection(expected_sims_words))
+        self.assertGreaterEqual(overlap_count, 2)
 
     def test_cbow_neg_training_fromfile(self):
         with temporary_file(get_tmpfile('gensim_fasttext.tst')) as corpus_file:
             model_gensim = FT_gensim(
                 vector_size=48, sg=0, cbow_mean=1, alpha=0.05, window=5, hs=0, negative=5,
-                min_count=5, epochs=10, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
+                min_count=5, epochs=5, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
                 sorted_vocab=1, workers=1, min_alpha=0.0, bucket=BUCKET)
 
             lee_data = LineSentence(datapath('lee_background.cor'))
@@ -600,17 +583,14 @@ class TestFastTextModel(unittest.TestCase):
                 u'remains',
                 u'overnight',
                 u'running']
-            overlaps = set(sims_gensim_words).intersection(expected_sims_words)
-            overlap_count = len(overlaps)
-            self.assertGreaterEqual(
-                overlap_count, 2,
-                "only %i overlap in expected %s & actual %s" % (overlap_count, expected_sims_words, sims_gensim_words))
+            overlap_count = len(set(sims_gensim_words).intersection(expected_sims_words))
+            self.assertGreaterEqual(overlap_count, 2)
 
     def test_sg_neg_training(self):
 
         model_gensim = FT_gensim(
             vector_size=48, sg=1, cbow_mean=1, alpha=0.025, window=5, hs=0, negative=5,
-            min_count=5, epochs=10, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
+            min_count=5, epochs=5, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
             sorted_vocab=1, workers=1, min_alpha=0.0, bucket=BUCKET * 4)
 
         lee_data = LineSentence(datapath('lee_background.cor'))
@@ -632,17 +612,14 @@ class TestFastTextModel(unittest.TestCase):
             u'firm',
             u'singles',
             u'death']
-        overlaps = set(sims_gensim_words).intersection(expected_sims_words)
-        overlap_count = len(overlaps)
-        self.assertGreaterEqual(
-            overlap_count, 2,
-            "only %i overlap in expected %s & actual %s" % (overlap_count, expected_sims_words, sims_gensim_words))
+        overlap_count = len(set(sims_gensim_words).intersection(expected_sims_words))
+        self.assertGreaterEqual(overlap_count, 2)
 
     def test_sg_neg_training_fromfile(self):
         with temporary_file(get_tmpfile('gensim_fasttext.tst')) as corpus_file:
             model_gensim = FT_gensim(
                 vector_size=48, sg=1, cbow_mean=1, alpha=0.025, window=5, hs=0, negative=5,
-                min_count=5, epochs=10, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
+                min_count=5, epochs=5, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
                 sorted_vocab=1, workers=1, min_alpha=0.0, bucket=BUCKET * 4)
 
             lee_data = LineSentence(datapath('lee_background.cor'))
@@ -668,20 +645,17 @@ class TestFastTextModel(unittest.TestCase):
                 u'firm',
                 u'singles',
                 u'death']
-            overlaps = set(sims_gensim_words).intersection(expected_sims_words)
-            overlap_count = len(overlaps)
-            self.assertGreaterEqual(
-                overlap_count, 2,
-                "only %i overlap in expected %s & actual %s" % (overlap_count, expected_sims_words, sims_gensim_words))
+            overlap_count = len(set(sims_gensim_words).intersection(expected_sims_words))
+            self.assertGreaterEqual(overlap_count, 2)
 
     def test_online_learning(self):
         model_hs = FT_gensim(sentences, vector_size=12, min_count=1, seed=42, hs=1, negative=0, bucket=BUCKET)
-        self.assertEqual(len(model_hs.wv), 12)
-        self.assertEqual(model_hs.wv.get_vecattr('graph', 'count'), 3)
+        self.assertTrue(len(model_hs.wv.vocab), 12)
+        self.assertTrue(model_hs.wv.vocab['graph'].count, 3)
         model_hs.build_vocab(new_sentences, update=True)  # update vocab
-        self.assertEqual(len(model_hs.wv), 14)
-        self.assertEqual(model_hs.wv.get_vecattr('graph', 'count'), 4)
-        self.assertEqual(model_hs.wv.get_vecattr('artificial', 'count'), 4)
+        self.assertEqual(len(model_hs.wv.vocab), 14)
+        self.assertTrue(model_hs.wv.vocab['graph'].count, 4)
+        self.assertTrue(model_hs.wv.vocab['artificial'].count, 4)
 
     def test_online_learning_fromfile(self):
         with temporary_file(get_tmpfile('gensim_fasttext1.tst')) as corpus_file, \
@@ -691,22 +665,22 @@ class TestFastTextModel(unittest.TestCase):
 
             model_hs = FT_gensim(
                 corpus_file=corpus_file, vector_size=12, min_count=1, seed=42, hs=1, negative=0, bucket=BUCKET)
-            self.assertTrue(len(model_hs.wv), 12)
-            self.assertTrue(model_hs.wv.get_vecattr('graph', 'count'), 3)
+            self.assertTrue(len(model_hs.wv.vocab), 12)
+            self.assertTrue(model_hs.wv.vocab['graph'].count, 3)
             model_hs.build_vocab(corpus_file=new_corpus_file, update=True)  # update vocab
-            self.assertEqual(len(model_hs.wv), 14)
-            self.assertTrue(model_hs.wv.get_vecattr('graph', 'count'), 4)
-            self.assertTrue(model_hs.wv.get_vecattr('artificial', 'count'), 4)
+            self.assertEqual(len(model_hs.wv.vocab), 14)
+            self.assertTrue(model_hs.wv.vocab['graph'].count, 4)
+            self.assertTrue(model_hs.wv.vocab['artificial'].count, 4)
 
     def test_online_learning_after_save(self):
         tmpf = get_tmpfile('gensim_fasttext.tst')
         model_neg = FT_gensim(sentences, vector_size=12, min_count=0, seed=42, hs=0, negative=5, bucket=BUCKET)
         model_neg.save(tmpf)
         model_neg = FT_gensim.load(tmpf)
-        self.assertTrue(len(model_neg.wv), 12)
+        self.assertTrue(len(model_neg.wv.vocab), 12)
         model_neg.build_vocab(new_sentences, update=True)  # update vocab
         model_neg.train(new_sentences, total_examples=model_neg.corpus_count, epochs=model_neg.epochs)
-        self.assertEqual(len(model_neg.wv), 14)
+        self.assertEqual(len(model_neg.wv.vocab), 14)
 
     def test_online_learning_after_save_fromfile(self):
         with temporary_file(get_tmpfile('gensim_fasttext1.tst')) as corpus_file, \
@@ -719,20 +693,20 @@ class TestFastTextModel(unittest.TestCase):
                 corpus_file=corpus_file, vector_size=12, min_count=0, seed=42, hs=0, negative=5, bucket=BUCKET)
             model_neg.save(tmpf)
             model_neg = FT_gensim.load(tmpf)
-            self.assertTrue(len(model_neg.wv), 12)
+            self.assertTrue(len(model_neg.wv.vocab), 12)
             model_neg.build_vocab(corpus_file=new_corpus_file, update=True)  # update vocab
             model_neg.train(corpus_file=new_corpus_file, total_words=model_neg.corpus_total_words,
                             epochs=model_neg.epochs)
-            self.assertEqual(len(model_neg.wv), 14)
+            self.assertEqual(len(model_neg.wv.vocab), 14)
 
     def online_sanity(self, model):
         terro, others = [], []
-        for line in list_corpus:
-            if 'terrorism' in line:
-                terro.append(line)
+        for l in list_corpus:
+            if 'terrorism' in l:
+                terro.append(l)
             else:
-                others.append(line)
-        self.assertTrue(all('terrorism' not in line for line in others))
+                others.append(l)
+        self.assertTrue(all('terrorism' not in l for l in others))
         model.build_vocab(others)
         start_vecs = model.wv.vectors_vocab.copy()
         model.train(others, total_examples=model.corpus_count, epochs=model.epochs)
@@ -740,10 +714,10 @@ class TestFastTextModel(unittest.TestCase):
         self.assertFalse(np.all(np.equal(start_vecs, model.wv.vectors_vocab)))
         # checks that `vectors` is different from `vectors_vocab`
         self.assertFalse(np.all(np.equal(model.wv.vectors, model.wv.vectors_vocab)))
-        self.assertFalse('terrorism' in model.wv.key_to_index)
+        self.assertFalse('terrorism' in model.wv.vocab)
         model.build_vocab(terro, update=True)  # update vocab
         self.assertTrue(model.wv.vectors_ngrams.dtype == 'float32')
-        self.assertTrue('terrorism' in model.wv.key_to_index)
+        self.assertTrue('terrorism' in model.wv.vocab)
         orig0_all = np.copy(model.wv.vectors_ngrams)
         model.train(terro, total_examples=len(terro), epochs=model.epochs)
         self.assertFalse(np.allclose(model.wv.vectors_ngrams, orig0_all))
@@ -785,7 +759,7 @@ class TestFastTextModel(unittest.TestCase):
         model = FT_gensim(sentences, min_count=1, vector_size=12, bucket=BUCKET)
         model.wv.save_word2vec_format(tmpf, binary=True)
         loaded_model_kv = KeyedVectors.load_word2vec_format(tmpf, binary=True)
-        self.assertEqual(len(model.wv), len(loaded_model_kv))
+        self.assertEqual(len(model.wv.vocab), len(loaded_model_kv.vocab))
         self.assertTrue(np.allclose(model.wv['human'], loaded_model_kv['human']))
 
     def test_bucket_ngrams(self):
@@ -803,22 +777,21 @@ class TestFastTextModel(unittest.TestCase):
         self.assertEqual(report['syn0_vocab'], 192)
         self.assertEqual(report['syn1'], 192)
         self.assertEqual(report['syn1neg'], 192)
-        # FIXME: these fixed numbers for particular implementation generations encumber changes without real QA
-        # perhaps instead verify reports' total is within some close factor of a deep-audit of actual memory used?
-        self.assertEqual(report['syn0_ngrams'], model.vector_size * np.dtype(np.float32).itemsize * BUCKET)
-        self.assertEqual(report['buckets_word'], 688)
-        self.assertEqual(report['total'], 484064)
+        self.assertEqual(report['syn0_ngrams'], 2688)
+        self.assertEqual(report['buckets_word'], 640)
+        self.assertEqual(report['total'], 6704)
 
+    @unittest.skipIf(IS_WIN32, "avoid memory error with Appveyor x32")
     def obsolete_testLoadOldModel(self):
         """Test loading fasttext models from previous version"""
 
         model_file = 'fasttext_old'
         model = FT_gensim.load(datapath(model_file))
         self.assertTrue(model.wv.vectors.shape == (12, 100))
-        self.assertTrue(len(model.wv) == 12)
-        self.assertTrue(len(model.wv.index_to_key) == 12)
+        self.assertTrue(len(model.wv.vocab) == 12)
+        self.assertTrue(len(model.wv.index2word) == 12)
         self.assertIsNone(model.corpus_total_words)
-        self.assertTrue(model.syn1neg.shape == (len(model.wv), model.vector_size))
+        self.assertTrue(model.syn1neg.shape == (len(model.wv.vocab), model.vector_size))
         self.assertTrue(model.wv.vectors_lockf.shape == (12, ))
         self.assertTrue(model.cum_table.shape == (12, ))
 
@@ -829,10 +802,10 @@ class TestFastTextModel(unittest.TestCase):
         model_file = 'fasttext_old_sep'
         model = FT_gensim.load(datapath(model_file))
         self.assertTrue(model.wv.vectors.shape == (12, 100))
-        self.assertTrue(len(model.wv) == 12)
-        self.assertTrue(len(model.wv.index_to_key) == 12)
+        self.assertTrue(len(model.wv.vocab) == 12)
+        self.assertTrue(len(model.wv.index2word) == 12)
         self.assertIsNone(model.corpus_total_words)
-        self.assertTrue(model.syn1neg.shape == (len(model.wv), model.vector_size))
+        self.assertTrue(model.syn1neg.shape == (len(model.wv.vocab), model.vector_size))
         self.assertTrue(model.wv.vectors_lockf.shape == (12, ))
         self.assertTrue(model.cum_table.shape == (12, ))
 
@@ -875,9 +848,27 @@ def load_vec(fin):
 
 
 def compare_wv(a, b, t):
-    a_count = {key: a.get_vecattr(key, 'count') for key in a.key_to_index}
-    b_count = {key: b.get_vecattr(key, 'count') for key in b.key_to_index}
+    a_count = {key: value.count for (key, value) in a.vocab.items()}
+    b_count = {key: value.count for (key, value) in b.vocab.items()}
     t.assertEqual(a_count, b_count)
+
+    #
+    # We don't compare indices because they depend on several things we
+    # cannot control during testing:
+    #
+    # 1. The order in which ties are broken when sorting the vocabulary
+    #    in prepare_vocab
+    # 2. The order in which vocab terms are added to vocab_raw
+    #
+    if False:
+        a_indices = {key: value.index for (key, value) in a.vocab.items()}
+        b_indices = {key: value.index for (key, value) in b.vocab.items()}
+        a_words = [k for k in sorted(a_indices, key=lambda x: a_indices[x])]
+        b_words = [k for k in sorted(b_indices, key=lambda x: b_indices[x])]
+        t.assertEqual(a_words, b_words)
+
+        t.assertEqual(a.index2word, b.index2word)
+        t.assertEqual(a.hash2index, b.hash2index)
 
     #
     # We do not compare most matrices directly, because they will never
@@ -888,6 +879,11 @@ def compare_wv(a, b, t):
 
     t.assertEqual(a.vectors_vocab.shape, b.vectors_vocab.shape)
     # t.assertTrue(np.allclose(a.vectors_vocab, b.vectors_vocab))
+
+    #
+    # Only if match_gensim=True in init_post_load
+    #
+    # t.assertEqual(a.vectors_ngrams.shape, b.vectors_ngrams.shape)
 
 
 def compare_nn(a, b, t):
@@ -920,7 +916,6 @@ def compare_vocabulary(a, b, t):
 
 class NativeTrainingContinuationTest(unittest.TestCase):
     maxDiff = None
-    model_structural_sanity = TestFastTextModel.model_structural_sanity
 
     def setUp(self):
         #
@@ -947,20 +942,28 @@ class NativeTrainingContinuationTest(unittest.TestCase):
             expected = dict(load_vec(fin))
 
         for word, expected_vector in expected.items():
-            actual_vector = native.wv.get_vector(word)
+            actual_vector = native.wv.word_vec(word)
             self.assertTrue(np.allclose(expected_vector, actual_vector, atol=1e-5))
-
-        self.model_structural_sanity(native)
 
     def test_out_of_vocab(self):
         """Test for correct representation of out-of-vocab words."""
         native = load_native()
 
         for word, expected_vector in self.oov_expected.items():
-            actual_vector = native.wv.get_vector(word)
+            actual_vector = native.wv.word_vec(word)
             self.assertTrue(np.allclose(expected_vector, actual_vector, atol=1e-5))
 
-        self.model_structural_sanity(native)
+    @unittest.skip('this test does not pass currently, I suspect a bug in our FT implementation')
+    def test_out_of_vocab_gensim(self):
+        """Test whether gensim gives similar results to FB for OOV words.
+
+        Seems to be broken for our toy model.
+        """
+        model = train_gensim()
+
+        for word, expected_vector in self.oov_expected.items():
+            actual_vector = model.wv.word_vec(word)
+            self.assertTrue(np.allclose(expected_vector, actual_vector, atol=1e-5))
 
     def test_sanity(self):
         """Compare models trained on toy data.  They should be equal."""
@@ -977,44 +980,52 @@ class NativeTrainingContinuationTest(unittest.TestCase):
         compare_vocabulary(trained, native, self)
         compare_nn(trained, native, self)
 
-        self.model_structural_sanity(trained)
-        self.model_structural_sanity(native)
-
     def test_continuation_native(self):
         """Ensure that training has had a measurable effect."""
         native = load_native()
-        self.model_structural_sanity(native)
 
         #
         # Pick a word that's is in both corpuses.
         # Its vectors should be different between training runs.
         #
-        word = 'human'  # FIXME: this isn't actually in model, except via OOV ngrams
-        old_vector = native.wv.get_vector(word).tolist()
+        word = 'human'
+        old_vector = native.wv.word_vec(word).tolist()
 
         native.train(list_corpus, total_examples=len(list_corpus), epochs=native.epochs)
 
-        new_vector = native.wv.get_vector(word).tolist()
+        new_vector = native.wv.word_vec(word).tolist()
         self.assertNotEqual(old_vector, new_vector)
-        self.model_structural_sanity(native)
 
     def test_continuation_gensim(self):
         """Ensure that continued training has had a measurable effect."""
         model = train_gensim(min_count=0)
-        self.model_structural_sanity(model)
         vectors_ngrams_before = np.copy(model.wv.vectors_ngrams)
 
         word = 'human'
-        old_vector = model.wv.get_vector(word).tolist()
+        old_vector = model.wv.word_vec(word).tolist()
 
         model.train(list_corpus, total_examples=len(list_corpus), epochs=model.epochs)
 
         vectors_ngrams_after = np.copy(model.wv.vectors_ngrams)
         self.assertFalse(np.allclose(vectors_ngrams_before, vectors_ngrams_after))
-        new_vector = model.wv.get_vector(word).tolist()
+        new_vector = model.wv.word_vec(word).tolist()
 
         self.assertNotEqual(old_vector, new_vector)
-        self.model_structural_sanity(model)
+
+    # TEST DISABLED: 'compatible-hash-false.model' possibly buggy/corrupt?
+    def segfaulting_test_continuation_load_gensim(self):
+        #
+        # This is a model from 3.6.0
+        #
+        model = FT_gensim.load(datapath('compatible-hash-false.model'))
+        vectors_ngrams_before = np.copy(model.wv.vectors_ngrams)
+        old_vector = model.wv.word_vec('human').tolist()
+
+        model.train(list_corpus, total_examples=len(list_corpus), epochs=model.epochs)
+        new_vector = model.wv.word_vec('human').tolist()
+
+        self.assertFalse(np.allclose(vectors_ngrams_before, model.wv.vectors_ngrams))
+        self.assertNotEqual(old_vector, new_vector)
 
     def test_save_load_gensim(self):
         """Test that serialization works end-to-end.  Not crashing is a success."""
@@ -1030,11 +1041,9 @@ class NativeTrainingContinuationTest(unittest.TestCase):
             train_gensim().save(model_name)
 
             model = FT_gensim.load(model_name)
-            self.model_structural_sanity(model)
             model.train(list_corpus, total_examples=len(list_corpus), epochs=model.epochs)
 
             model.save(model_name)
-            self.model_structural_sanity(model)
 
     def test_save_load_native(self):
         """Test that serialization works end-to-end.  Not crashing is a success."""
@@ -1045,24 +1054,21 @@ class NativeTrainingContinuationTest(unittest.TestCase):
             load_native().save(model_name)
 
             model = FT_gensim.load(model_name)
-            self.model_structural_sanity(model)
             model.train(list_corpus, total_examples=len(list_corpus), epochs=model.epochs)
 
             model.save(model_name)
-            self.model_structural_sanity(model)
 
     def test_load_native_pretrained(self):
         model = gensim.models.fasttext.load_facebook_model(datapath('toy-model-pretrained.bin'))
         actual = model.wv['monarchist']
         expected = np.array([0.76222, 1.0669, 0.7055, -0.090969, -0.53508])
         self.assertTrue(np.allclose(expected, actual, atol=10e-4))
-        self.model_structural_sanity(model)
 
     def test_load_native_vectors(self):
         cap_path = datapath("crime-and-punishment.bin")
         fbkv = gensim.models.fasttext.load_facebook_vectors(cap_path)
-        self.assertFalse('landlord' in fbkv.key_to_index)
-        self.assertTrue('landlady' in fbkv.key_to_index)
+        self.assertFalse('landlord' in fbkv.vocab)
+        self.assertTrue('landlady' in fbkv.vocab)
         oov_vector = fbkv['landlord']
         iv_vector = fbkv['landlady']
         self.assertFalse(np.allclose(oov_vector, iv_vector))
@@ -1073,7 +1079,6 @@ class NativeTrainingContinuationTest(unittest.TestCase):
         v1 = model.wv['']
         origin = np.zeros(v1.shape, v1.dtype)
         self.assertTrue(np.allclose(v1, origin))
-        self.model_structural_sanity(model)
 
 
 def _train_model_with_pretrained_vectors():
@@ -1097,10 +1102,20 @@ class HashCompatibilityTest(unittest.TestCase):
     def test_compatibility_true(self):
         m = FT_gensim.load(datapath('compatible-hash-true.model'))
         self.assertTrue(m.wv.compatible_hash)
+        self.assertEqual(m.bucket, m.wv.bucket)
+
+    def test_compatibility_false(self):
+        #
+        # Originally obtained using and older version of gensim (e.g. 3.6.0).
+        #
+        m = FT_gensim.load(datapath('compatible-hash-false.model'))
+        self.assertFalse(m.wv.compatible_hash)
+        self.assertEqual(m.bucket, m.wv.bucket)
 
     def test_hash_native(self):
         m = load_native()
         self.assertTrue(m.wv.compatible_hash)
+        self.assertEqual(m.bucket, m.wv.bucket)
 
 
 class FTHashResultsTest(unittest.TestCase):
@@ -1150,6 +1165,7 @@ def hash_main(alg):
     assert six.PY3, 'this only works under Py3'
 
     hashmap = {
+        'cy_broken': ft_hash_broken,
         'cy_bytes': ft_hash_bytes,
     }
     try:
@@ -1173,7 +1189,7 @@ class FTHashFunctionsTest(unittest.TestCase):
         #
         # $ echo word1 ... wordN | python -c 'from gensim.test.test_fasttext import hash_main;hash_main("alg")'  # noqa: E501
         #
-        # where alg is cy_bytes (previous options had included: py_bytes, py_broken, cy_bytes, cy_broken.)
+        # where alg is one of py_bytes, py_broken, cy_bytes, cy_broken.
 
         #
         self.expected = {
@@ -1192,10 +1208,30 @@ class FTHashFunctionsTest(unittest.TestCase):
             u'札幌': 3909947444,
             u'西区': 3653372632,
         }
+        self.expected_broken = {
+            u'команда': 962806708,
+            u'маленьких': 3633597485,
+            u'друзей': 214728041,
+            u'возит': 3590926132,
+            u'грузы': 3674544745,
+            u'всех': 3931012458,
+            u'быстрей': 822471432,
+            u'mysterious': 1903186891,
+            u'asteroid': 1988297200,
+            u'odyssey': 310195777,
+            u'introduction': 2848265721,
+            u'北海道': 4017049120,
+            u'札幌': 1706980764,
+            u'西区': 1113327900,
+        }
 
     def test_cython(self):
         actual = {k: ft_hash_bytes(k.encode('utf-8')) for k in self.expected}
         self.assertEqual(self.expected, actual)
+
+    def test_cython_broken(self):
+        actual = {k: ft_hash_broken(k) for k in self.expected}
+        self.assertEqual(self.expected_broken, actual)
 
 
 #
@@ -1488,7 +1524,7 @@ class SaveFacebookFormatModelTest(unittest.TestCase):
     def _check_roundtrip(self, sg):
         model_params = {
             "sg": sg,
-            "vector_size": 10,
+            "vector_size": 12,
             "min_count": 1,
             "hs": 1,
             "negative": 5,
@@ -1506,13 +1542,13 @@ class SaveFacebookFormatModelTest(unittest.TestCase):
         self.assertEqual(model_trained.negative, model_loaded.negative)
         self.assertEqual(model_trained.hs, model_loaded.hs)
         self.assertEqual(model_trained.sg, model_loaded.sg)
-        self.assertEqual(model_trained.wv.bucket, model_loaded.wv.bucket)
+        self.assertEqual(model_trained.bucket, model_loaded.bucket)
         self.assertEqual(model_trained.wv.min_n, model_loaded.wv.min_n)
         self.assertEqual(model_trained.wv.max_n, model_loaded.wv.max_n)
         self.assertEqual(model_trained.sample, model_loaded.sample)
-        self.assertEqual(set(model_trained.wv.index_to_key), set(model_loaded.wv.index_to_key))
+        self.assertEqual(set(model_trained.wv.index2word), set(model_loaded.wv.index2word))
 
-        for w in model_trained.wv.index_to_key:
+        for w in model_trained.wv.index2word:
             v_orig = model_trained.wv[w]
             v_loaded = model_loaded.wv[w]
             self.assertLess(calc_max_diff(v_orig, v_loaded), MAX_WORDVEC_COMPONENT_DIFFERENCE)
@@ -1543,7 +1579,7 @@ class SaveGensimByteIdentityTest(unittest.TestCase):
     def _check_roundtrip_file_file(self, sg):
         model_params = {
             "sg": sg,
-            "vector_size": 10,
+            "vector_size": 12,
             "min_count": 1,
             "hs": 1,
             "negative": 0,
@@ -1594,7 +1630,7 @@ class SaveFacebookByteIdentityTest(unittest.TestCase):
     """
 
     def _check_roundtrip_file_file(self, sg):
-        model_params = {"vector_size": 10, "sg": sg, "seed": 42}
+        model_params = {"vector_size": 12, "sg": sg, "seed": 42}
 
         # fasttext tool creates both *vec and *bin files, so we have to remove both, even thought *vec is unused
 
@@ -1626,7 +1662,7 @@ def _read_wordvectors_using_fasttext(fasttext_fname, words):
         stdout=subprocess.PIPE)
     words_str = '\n'.join(words)
     out, _ = process.communicate(input=words_str.encode("utf-8"))
-    return np.array([line_to_array(line) for line in out.splitlines()], dtype=np.float32)
+    return np.array([line_to_array(l) for l in out.splitlines()], dtype=np.float32)
 
 
 @unittest.skipIf(not os.environ.get("FT_HOME", None), "FT_HOME env variable not set, skipping test")
@@ -1643,7 +1679,7 @@ class SaveFacebookFormatReadingTest(unittest.TestCase):
     def _check_load_fasttext_format(self, sg):
         model_params = {
             "sg": sg,
-            "vector_size": 10,
+            "vector_size": 12,
             "min_count": 1,
             "hs": 1,
             "negative": 5,
@@ -1653,9 +1689,9 @@ class SaveFacebookFormatReadingTest(unittest.TestCase):
 
         with temporary_file("load_fasttext.bin") as fpath:
             model = _create_and_save_fb_model(fpath, model_params)
-            wv = _read_wordvectors_using_fasttext(fpath, model.wv.index_to_key)
+            wv = _read_wordvectors_using_fasttext(fpath, model.wv.index2word)
 
-        for i, w in enumerate(model.wv.index_to_key):
+        for i, w in enumerate(model.wv.index2word):
             diff = calc_max_diff(wv[i, :], model.wv[w])
             # Because fasttext command line prints vectors with limited accuracy
             self.assertLess(diff, 1.0e-4)
@@ -1667,7 +1703,32 @@ class SaveFacebookFormatReadingTest(unittest.TestCase):
         self._check_load_fasttext_format(sg=0)
 
 
+class TestFastTextKeyedVectors(unittest.TestCase):
+    def test_ft_kv_backward_compat_w_360(self):
+        kv = KeyedVectors.load(datapath("ft_kv_3.6.0.model.gz"))
+        ft_kv = FastTextKeyedVectors.load(datapath("ft_kv_3.6.0.model.gz"))
+
+        expected = ['trees', 'survey', 'system', 'graph', 'interface']
+        actual = [word for (word, similarity) in kv.most_similar("human", topn=5)]
+
+        self.assertEqual(actual, expected)
+
+        actual = [word for (word, similarity) in ft_kv.most_similar("human", topn=5)]
+
+        self.assertEqual(actual, expected)
+
+
 class UnpackTest(unittest.TestCase):
+    def test_copy_sanity(self):
+        m = np.array(range(9))
+        m.shape = (3, 3)
+        hash2index = {10: 0, 11: 1, 12: 2}
+
+        n = _unpack_copy(m, 25, hash2index)
+        self.assertTrue(np.all(m[0] == n[10]))
+        self.assertTrue(np.all(m[1] == n[11]))
+        self.assertTrue(np.all(m[2] == n[12]))
+
     def test_sanity(self):
         m = np.array(range(9))
         m.shape = (3, 3)

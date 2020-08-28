@@ -435,7 +435,7 @@ def _get_field_from_model(model, field):
         requested field name, fields are listed in the `_NEW_HEADER_FORMAT` list
     """
     if field == 'bucket':
-        return model.wv.bucket
+        return model.bucket
     elif field == 'dim':
         return model.vector_size
     elif field == 'epoch':
@@ -531,9 +531,9 @@ def _dict_save(fout, model, encoding):
     # In the unsupervised case we have only words (no labels). Hence both fields
     # are equal.
 
-    fout.write(np.int32(len(model.wv)).tobytes())
+    fout.write(np.int32(len(model.wv.vocab)).tobytes())
 
-    fout.write(np.int32(len(model.wv)).tobytes())
+    fout.write(np.int32(len(model.wv.vocab)).tobytes())
 
     # nlabels=0 <- no labels  we are in unsupervised mode
     fout.write(np.int32(0).tobytes())
@@ -544,7 +544,7 @@ def _dict_save(fout, model, encoding):
     fout.write(np.int64(-1))
 
     for word in model.wv.index2word:
-        word_count = model.wv.get_vecattr(word, 'count')
+        word_count = model.wv.vocab[word].count
         fout.write(word.encode(encoding))
         fout.write(_END_OF_WORD_MARKER)
         fout.write(np.int64(word_count).tobytes())
@@ -572,7 +572,7 @@ def _input_save(fout, model):
     ngrams_n, ngrams_dim = model.wv.vectors_ngrams.shape
 
     assert vocab_dim == ngrams_dim
-    assert vocab_n == len(model.wv)
+    assert vocab_n == len(model.wv.vocab)
     assert ngrams_n == model.wv.bucket
 
     fout.write(struct.pack('@2q', vocab_n + ngrams_n, vocab_dim))

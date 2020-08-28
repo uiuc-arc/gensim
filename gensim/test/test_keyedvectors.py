@@ -14,7 +14,7 @@ import unittest
 
 import numpy as np
 
-from gensim.models.keyedvectors import KeyedVectors, REAL, pseudorandom_weak_vector
+from gensim.models.keyedvectors import KeyedVectors, REAL
 from gensim.test.utils import datapath
 import gensim.models.keyedvectors
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class TestKeyedVectors(unittest.TestCase):
     def setUp(self):
         self.vectors = KeyedVectors.load_word2vec_format(
-            datapath('euclidean_vectors.bin'), binary=True)
+            datapath('euclidean_vectors.bin'), binary=True, datatype=np.float64)
         self.model_path = datapath("w2v_keyedvectors_load_test.modeldata")
         self.vocab_path = datapath("w2v_keyedvectors_load_test.vocab")
 
@@ -46,7 +46,7 @@ class TestKeyedVectors(unittest.TestCase):
         self.assertEqual(len(self.vectors.most_similar('war', topn=10)), 10)
 
         predicted = self.vectors.most_similar('war', topn=None)
-        self.assertEqual(len(predicted), len(self.vectors))
+        self.assertEqual(len(predicted), len(self.vectors.vocab))
 
         predicted = self.vectors.most_similar('war', topn=0)
         self.assertEqual(len(predicted), 0)
@@ -65,7 +65,7 @@ class TestKeyedVectors(unittest.TestCase):
         ]  # synonyms for "good" as per wordnet
         cos_sim = []
         for i in range(len(wordnet_syn)):
-            if wordnet_syn[i] in self.vectors:
+            if wordnet_syn[i] in self.vectors.vocab:
                 cos_sim.append(self.vectors.similarity("good", wordnet_syn[i]))
         cos_sim = sorted(cos_sim, reverse=True)  # cosine_similarity of "good" with wordnet_syn in decreasing order
         # computing relative_cosine_similarity of two similar words
@@ -178,9 +178,9 @@ class TestKeyedVectors(unittest.TestCase):
         vectors = [np.random.randn(self.vectors.vector_size) for _ in range(5)]
 
         # Test `add` on already filled kv.
-        vocab_size = len(self.vectors)
+        vocab_size = len(self.vectors.vocab)
         self.vectors.add(entities, vectors, replace=False)
-        self.assertEqual(vocab_size + len(entities), len(self.vectors))
+        self.assertEqual(vocab_size + len(entities), len(self.vectors.vocab))
 
         for ent, vector in zip(entities, vectors):
             self.assertTrue(np.allclose(self.vectors[ent], vector))
@@ -188,7 +188,7 @@ class TestKeyedVectors(unittest.TestCase):
         # Test `add` on empty kv.
         kv = KeyedVectors(self.vectors.vector_size)
         kv[entities] = vectors
-        self.assertEqual(len(kv), len(entities))
+        self.assertEqual(len(kv.vocab), len(entities))
 
         for ent, vector in zip(entities, vectors):
             self.assertTrue(np.allclose(kv[ent], vector))
@@ -204,32 +204,32 @@ class TestKeyedVectors(unittest.TestCase):
 
     def test_set_item(self):
         """Test that __setitem__ works correctly."""
-        vocab_size = len(self.vectors)
+        vocab_size = len(self.vectors.vocab)
 
         # Add new entity.
         entity = '___some_new_entity___'
         vector = np.random.randn(self.vectors.vector_size)
         self.vectors[entity] = vector
 
-        self.assertEqual(len(self.vectors), vocab_size + 1)
+        self.assertEqual(len(self.vectors.vocab), vocab_size + 1)
         self.assertTrue(np.allclose(self.vectors[entity], vector))
 
         # Replace vector for entity in vocab.
-        vocab_size = len(self.vectors)
+        vocab_size = len(self.vectors.vocab)
         vector = np.random.randn(self.vectors.vector_size)
         self.vectors['war'] = vector
 
-        self.assertEqual(len(self.vectors), vocab_size)
+        self.assertEqual(len(self.vectors.vocab), vocab_size)
         self.assertTrue(np.allclose(self.vectors['war'], vector))
 
         # __setitem__ on several entities.
-        vocab_size = len(self.vectors)
+        vocab_size = len(self.vectors.vocab)
         entities = ['war', '___some_new_entity1___', '___some_new_entity2___', 'terrorism', 'conflict']
         vectors = [np.random.randn(self.vectors.vector_size) for _ in range(len(entities))]
 
         self.vectors[entities] = vectors
 
-        self.assertEqual(len(self.vectors), vocab_size + 2)
+        self.assertEqual(len(self.vectors.vocab), vocab_size + 2)
         for ent, vector in zip(entities, vectors):
             self.assertTrue(np.allclose(self.vectors[ent], vector))
 
@@ -243,10 +243,10 @@ class TestKeyedVectors(unittest.TestCase):
         """Test loading model and voacab files which have decoding errors: replace mode"""
         model = gensim.models.KeyedVectors.load_word2vec_format(
             self.model_path, fvocab=self.vocab_path, binary=False, unicode_errors="replace")
-        self.assertEqual(model.get_vecattr(u'ありがとう�', 'count'), 123)
-        self.assertEqual(model.get_vecattr(u'どういたしまして�', 'count'), 789)
-        self.assertEqual(model.key_to_index[u'ありがとう�'], 0)
-        self.assertEqual(model.key_to_index[u'どういたしまして�'], 1)
+        self.assertEqual(model.vocab[u'ありがとう�'].count, 123)
+        self.assertEqual(model.vocab[u'どういたしまして�'].count, 789)
+        self.assertEqual(model.vocab[u'ありがとう�'].index, 0)
+        self.assertEqual(model.vocab[u'どういたしまして�'].index, 1)
         self.assertTrue(np.array_equal(
             model.get_vector(u'ありがとう�'), np.array([.6, .6, .6], dtype=np.float32)))
         self.assertTrue(np.array_equal(
@@ -256,50 +256,34 @@ class TestKeyedVectors(unittest.TestCase):
         """Test loading model and voacab files which have decoding errors: ignore mode"""
         model = gensim.models.KeyedVectors.load_word2vec_format(
             self.model_path, fvocab=self.vocab_path, binary=False, unicode_errors="ignore")
-        self.assertEqual(model.get_vecattr(u'ありがとう', 'count'), 123)
-        self.assertEqual(model.get_vecattr(u'どういたしまして', 'count'), 789)
-        self.assertEqual(model.key_to_index[u'ありがとう'], 0)
-        self.assertEqual(model.key_to_index[u'どういたしまして'], 1)
+        print(model.vocab.keys())
+        self.assertEqual(model.vocab[u'ありがとう'].count, 123)
+        self.assertEqual(model.vocab[u'どういたしまして'].count, 789)
+        self.assertEqual(model.vocab[u'ありがとう'].index, 0)
+        self.assertEqual(model.vocab[u'どういたしまして'].index, 1)
         self.assertTrue(np.array_equal(
             model.get_vector(u'ありがとう'), np.array([.6, .6, .6], dtype=np.float32)))
         self.assertTrue(np.array_equal(
             model.get_vector(u'どういたしまして'), np.array([.1, .2, .3], dtype=np.float32)))
 
-    def test_save_reload(self):
-        randkv = KeyedVectors(vector_size=100)
-        count = 20
-        keys = [str(i) for i in range(count)]
-        weights = [pseudorandom_weak_vector(randkv.vector_size) for _ in range(count)]
-        randkv.add(keys, weights)
-        tmpfiletxt = gensim.test.utils.get_tmpfile("tmp_kv.txt")
-        randkv.save_word2vec_format(tmpfiletxt, binary=False)
-        reloadtxtkv = KeyedVectors.load_word2vec_format(tmpfiletxt, binary=False)
-        self.assertEqual(randkv.index_to_key, reloadtxtkv.index_to_key)
-        self.assertTrue((randkv.vectors == reloadtxtkv.vectors).all())
-        tmpfilebin = gensim.test.utils.get_tmpfile("tmp_kv.bin")
-        randkv.save_word2vec_format(tmpfilebin, binary=True)
-        reloadbinkv = KeyedVectors.load_word2vec_format(tmpfilebin, binary=True)
-        self.assertEqual(randkv.index_to_key, reloadbinkv.index_to_key)
-        self.assertTrue((randkv.vectors == reloadbinkv.vectors).all())
 
-    def test_no_header(self):
-        randkv = KeyedVectors(vector_size=100)
-        count = 20
-        keys = [str(i) for i in range(count)]
-        weights = [pseudorandom_weak_vector(randkv.vector_size) for _ in range(count)]
-        randkv.add(keys, weights)
-        tmpfiletxt = gensim.test.utils.get_tmpfile("tmp_kv.txt")
-        randkv.save_word2vec_format(tmpfiletxt, binary=False, write_header=False)
-        reloadtxtkv = KeyedVectors.load_word2vec_format(tmpfiletxt, binary=False, no_header=True)
-        self.assertEqual(randkv.index_to_key, reloadtxtkv.index_to_key)
-        self.assertTrue((randkv.vectors == reloadtxtkv.vectors).all())
+class L2NormTest(unittest.TestCase):
+    def test(self):
+        m = np.array(range(1, 10), dtype=np.float32)
+        m.shape = (3, 3)
+
+        norm = gensim.models.keyedvectors._l2_norm(m)
+        self.assertFalse(np.allclose(m, norm))
+
+        gensim.models.keyedvectors._l2_norm(m, replace=True)
+        self.assertTrue(np.allclose(m, norm))
 
 
 class Gensim320Test(unittest.TestCase):
     def test(self):
         path = datapath('old_keyedvectors_320.dat')
         vectors = gensim.models.keyedvectors.KeyedVectors.load(path)
-        self.assertTrue(vectors.get_vector('computer') is not None)
+        self.assertTrue(vectors.word_vec('computer') is not None)
 
 
 def save_dict_to_word2vec_formated_file(fname, word2vec_dict):
@@ -321,7 +305,7 @@ def save_dict_to_word2vec_formated_file(fname, word2vec_dict):
 class LoadWord2VecFormatTest(unittest.TestCase):
 
     def assert_dict_equal_to_model(self, d, m):
-        self.assertEqual(len(d), len(m))
+        self.assertEqual(len(d), len(m.vocab))
 
         for word in d.keys():
             self.assertSequenceEqual(list(d[word]), list(m[word]))

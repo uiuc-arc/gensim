@@ -18,7 +18,7 @@ import logging
 import numpy as np
 
 from gensim import utils
-from gensim.models.keyedvectors import KeyedVectors
+from gensim.models.keyedvectors import KeyedVectors, SimpleVocab
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class VarEmbed(KeyedVectors):
 
     """
     def __init__(self):
-        super(VarEmbed, self).__init__(vector_size=0)
+        self.vector_size = 0
         self.vocab_size = 0
 
     @classmethod
@@ -87,22 +87,21 @@ class VarEmbed(KeyedVectors):
 
         """
         logger.info("Loading the vocabulary")
-        self.key_to_index = {}
-        self.index_to_key = []
+        self.vocab = {}
+        self.index2word = []
         counts = {}
         for word in word_to_ix:
             counts[word] = counts.get(word, 0) + 1
         self.vocab_size = len(counts)
         self.vector_size = word_embeddings.shape[1]
         self.vectors = np.zeros((self.vocab_size, self.vector_size))
-        self.index_to_key = [None] * self.vocab_size
-        logger.info("Corpus has %i words", len(self))
+        self.index2word = [None] * self.vocab_size
+        logger.info("Corpus has %i words", len(self.vocab))
         for word_id, word in enumerate(counts):
-            self.index_to_key[word_id] = word
-            self.key_to_index[word] = word_id
-            self.set_vecattr(word, 'count', counts[word])
+            self.vocab[word] = SimpleVocab(index=word_id, count=counts[word])
             self.vectors[word_id] = word_embeddings[word_to_ix[word]]
-        assert((len(self.key_to_index), self.vector_size) == self.vectors.shape)
+            self.index2word[word_id] = word
+        assert((len(self.vocab), self.vector_size) == self.vectors.shape)
         logger.info("Loaded matrix of %d size and %d dimensions", self.vocab_size, self.vector_size)
 
     def add_morphemes_to_embeddings(self, morfessor_model, morpho_embeddings, morpho_to_ix):
@@ -118,12 +117,12 @@ class VarEmbed(KeyedVectors):
             Mapping morpheme to index.
 
         """
-        for word in self.key_to_index:
+        for word in self.vocab:
             morpheme_embedding = np.array(
                 [
                     morpho_embeddings[morpho_to_ix.get(m, -1)]
                     for m in morfessor_model.viterbi_segment(word)[0]
                 ]
             ).sum(axis=0)
-            self.vectors[self.get_index(word)] += morpheme_embedding
+            self.vectors[self.vocab[word].index] += morpheme_embedding
         logger.info("Added morphemes to word vectors")

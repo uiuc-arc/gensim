@@ -74,15 +74,15 @@ from collections.abc import Iterable
 from timeit import default_timer
 from dataclasses import dataclass
 
-from numpy import zeros, float32 as REAL, vstack, integer, dtype
+from numpy import zeros, float32 as REAL, ones, \
+    memmap as np_memmap, vstack, integer, dtype
 import numpy as np
 
 from gensim import utils, matutils  # utility fnc for pickling, common scipy operations etc
-from gensim.utils import deprecated
 from gensim.models import Word2Vec
 from six.moves import range
 from six import string_types, integer_types, itervalues
-from gensim.models.keyedvectors import KeyedVectors, pseudorandom_weak_vector
+from gensim.models.keyedvectors import KeyedVectors, ConcatList, pseudorandom_weak_vector
 
 logger = logging.getLogger(__name__)
 
@@ -144,12 +144,11 @@ class TaggedDocument(namedtuple('TaggedDocument', 'words tags')):
 
 
 @dataclass
-class Doctag:
+class DoctagVocab:
     """A dataclass shape-compatible with keyedvectors.SimpleVocab, extended to record
     details of string document tags discovered during the initial vocabulary scan.
 
-    Will not be used if all presented document tags are ints. No longer used in a
-    completed model: just used during initial scan, and for backward compatibility.
+    Will not be used if all presented document tags are ints.
     """
     __slots__ = ('doc_count', 'index', 'word_count')
     doc_count: int  # number of docs where tag appeared
@@ -165,9 +164,13 @@ class Doctag:
         self.doc_count = new_val
 
 
+# compatibility alias, allowing prior namedtuples to unpickle
+Doctag = DoctagVocab
+
+
 class Doc2Vec(Word2Vec):
     def __init__(self, documents=None, corpus_file=None, vector_size=100, dm_mean=None, dm=1, dbow_words=0, dm_concat=0,
-                 dm_tag_count=1, dv=None, dv_mapfile=None, comment=None, trim_rule=None, callbacks=(),
+                 dm_tag_count=1, docvecs=None, docvecs_mapfile=None, comment=None, trim_rule=None, callbacks=(),
                  window=5, epochs=10, **kwargs):
         """Class for training, using and evaluating neural networks described in
         `Distributed Representations of Sentences and Documents <http://arxiv.org/abs/1405.4053v2>`_.
@@ -267,14 +270,14 @@ class Doc2Vec(Word2Vec):
             This object essentially contains the mapping between words and embeddings. After training, it can be used
             directly to query those embeddings in various ways. See the module level docstring for examples.
 
-        dv : :class:`~gensim.models.keyedvectors.KeyedVectors`
+        docvecs : :class:`~gensim.models.keyedvectors.KeyedVectors`
             This object contains the paragraph vectors learned from the training data. There will be one such vector
             for each unique document tag supplied during training. They may be individually accessed using the tag
             as an indexed-access key. For example, if one of the training documents used a tag of 'doc003':
 
             .. sourcecode:: pycon
 
-                >>> model.dv['doc003']
+                >>> model.docvecs['doc003']
         """
         corpus_iterable = documents
 
@@ -289,7 +292,7 @@ class Doc2Vec(Word2Vec):
             logger.info("using concatenative %d-dimensional layer1", self.layer1_size)
 
         self.vector_size = vector_size
-        self.dv = dv or KeyedVectors(self.vector_size, mapfile_path=dv_mapfile)
+        self.docvecs = docvecs or KeyedVectors(self.vector_size, mapfile_path=docvecs_mapfile)
 
         super(Doc2Vec, self).__init__(
             sentences=corpus_iterable,
@@ -318,35 +321,29 @@ class Doc2Vec(Word2Vec):
         """
         return self.sg  # same as SG
 
-    @property
-    @deprecated("The `docvecs` property has been renamed `dv`.")
-    def docvecs(self):
-        return self.dv
-
-    @docvecs.setter
-    @deprecated("The `docvecs` property has been renamed `dv`.")
-    def docvecs(self, value):
-        self.dv = value
-
     def _clear_post_train(self):
+        """Alias for :meth:`~gensim.models.doc2vec.Doc2Vec.clear_sims`."""
+        self.clear_sims()
+
+    def clear_sims(self):
         """Resets the current word vectors. """
-        self.wv.norms = None
-        self.dv.norms = None
+        self.wv.vectors_norm = None
+        self.docvecs.vectors_norm = None
 
     def reset_weights(self):
         super(Doc2Vec, self).reset_weights()
-        self.dv.resize_vectors()
-        self.dv.randomly_initialize_vectors()
-        self.dv.vectors_lockf = np.ones(1, dtype=REAL)  # 0.0 values suppress word-backprop-updates; 1.0 allows
+        self.docvecs.resize_vectors()
+        self.docvecs.randomly_initialize_vectors()
+        if self.docvecs.mapfile_path:
+            self.docvecs.vectors_lockf = np_memmap(
+                self.docvecs.mapfile_path + '.vectors_lockf', dtype=REAL, mode='w+', shape=(len(self.docvecs.vectors),)
+            )
+            self.docvecs.vectors_lockf.fill(1.0)
+        else:
+            self.docvecs.vectors_lockf = ones((len(self.docvecs.vectors),), dtype=REAL)  # zeros suppress learning
 
     def reset_from(self, other_model):
         """Copy shareable data structures from another (possibly pre-trained) model.
-
-        This specifically causes some structures to be shared, so is limited to
-        structures (like those rleated to the known word/tag vocabularies) that
-        won't change during training or thereafter. Beware vocabulary edits/updates
-        to either model afterwards: the partial sharing and out-of-band modification
-        may leave the other model in a broken state.
 
         Parameters
         ----------
@@ -354,21 +351,19 @@ class Doc2Vec(Word2Vec):
             Other model whose internal data structures will be copied over to the current object.
 
         """
-        self.wv.key_to_index = other_model.wv.key_to_index
-        self.wv.index_to_key = other_model.wv.index_to_key
-        self.wv.expandos = other_model.wv.expandos
+        self.wv.vocab = other_model.wv.vocab
+        self.wv.index2key = other_model.wv.index2key
         self.cum_table = other_model.cum_table
         self.corpus_count = other_model.corpus_count
-        self.dv.key_to_index = other_model.dv.key_to_index
-        self.dv.index_to_key = other_model.dv.index_to_key
-        self.dv.expandos = other_model.dv.expandos
+        self.docvecs.vocab = other_model.docvecs.vocab
+        self.docvecs.index2key = other_model.docvecs.index2key
         self.reset_weights()
 
     def _do_train_epoch(self, corpus_file, thread_id, offset, cython_vocab, thread_private_mem, cur_epoch,
                         total_examples=None, total_words=None, offsets=None, start_doctags=None, **kwargs):
         work, neu1 = thread_private_mem
-        doctag_vectors = self.dv.vectors
-        doctags_lockf = self.dv.vectors_lockf
+        doctag_vectors = self.docvecs.vectors
+        doctag_locks = self.docvecs.vectors_lockf
 
         offset = offsets[thread_id]
         start_doctag = start_doctags[thread_id]
@@ -376,18 +371,18 @@ class Doc2Vec(Word2Vec):
         if self.sg:
             examples, tally, raw_tally = d2v_train_epoch_dbow(
                 self, corpus_file, offset, start_doctag, cython_vocab, cur_epoch,
-                total_examples, total_words, work, neu1, len(self.dv),
-                doctag_vectors=doctag_vectors, doctags_lockf=doctags_lockf, train_words=self.dbow_words)
+                total_examples, total_words, work, neu1, len(self.docvecs),
+                doctag_vectors=doctag_vectors, doctag_locks=doctag_locks, train_words=self.dbow_words)
         elif self.dm_concat:
             examples, tally, raw_tally = d2v_train_epoch_dm_concat(
                 self, corpus_file, offset, start_doctag, cython_vocab, cur_epoch,
-                total_examples, total_words, work, neu1, len(self.dv),
-                doctag_vectors=doctag_vectors, doctags_lockf=doctags_lockf)
+                total_examples, total_words, work, neu1, len(self.docvecs),
+                doctag_vectors=doctag_vectors, doctag_locks=doctag_locks)
         else:
             examples, tally, raw_tally = d2v_train_epoch_dm(
                 self, corpus_file, offset, start_doctag, cython_vocab, cur_epoch,
-                total_examples, total_words, work, neu1, len(self.dv),
-                doctag_vectors=doctag_vectors, doctags_lockf=doctags_lockf)
+                total_examples, total_words, work, neu1, len(self.docvecs),
+                doctag_vectors=doctag_vectors, doctag_locks=doctag_locks)
 
         return examples, tally, raw_tally
 
@@ -412,23 +407,23 @@ class Doc2Vec(Word2Vec):
         work, neu1 = inits
         tally = 0
         for doc in job:
-            doctag_indexes = [self.dv.get_index(tag) for tag in doc.tags if tag in self.dv]
-            doctag_vectors = self.dv.vectors
-            doctags_lockf = self.dv.vectors_lockf
+            doctag_indexes = [self.docvecs.get_index(tag) for tag in doc.tags if tag in self.docvecs]
+            doctag_vectors = self.docvecs.vectors
+            doctag_locks = self.docvecs.vectors_lockf
             if self.sg:
                 tally += train_document_dbow(
                     self, doc.words, doctag_indexes, alpha, work, train_words=self.dbow_words,
-                    doctag_vectors=doctag_vectors, doctags_lockf=doctags_lockf
+                    doctag_vectors=doctag_vectors, doctag_locks=doctag_locks
                 )
             elif self.dm_concat:
                 tally += train_document_dm_concat(
                     self, doc.words, doctag_indexes, alpha, work, neu1,
-                    doctag_vectors=doctag_vectors, doctags_lockf=doctags_lockf
+                    doctag_vectors=doctag_vectors, doctag_locks=doctag_locks
                 )
             else:
                 tally += train_document_dm(
                     self, doc.words, doctag_indexes, alpha, work, neu1,
-                    doctag_vectors=doctag_vectors, doctags_lockf=doctags_lockf
+                    doctag_vectors=doctag_vectors, doctag_locks=doctag_locks
                 )
         return tally, self._raw_word_count(job)
 
@@ -581,7 +576,7 @@ class Doc2Vec(Word2Vec):
             The estimated RAM required to look up a tag in bytes.
 
         """
-        return 60 * len(self.dv) + 140 * len(self.dv)
+        return 60 * len(self.docvecs.vocab) + 140 * len(self.docvecs.vocab)
 
     def infer_vector(self, doc_words, alpha=None, min_alpha=None, epochs=None, steps=None):
         """Infer a vector for given post-bulk training document.
@@ -618,10 +613,10 @@ class Doc2Vec(Word2Vec):
         min_alpha = min_alpha or self.min_alpha
         epochs = epochs or self.epochs
 
-        doctag_vectors = pseudorandom_weak_vector(self.dv.vector_size, seed_string=' '.join(doc_words))
-        doctag_vectors = doctag_vectors.reshape(1, self.dv.vector_size)
+        doctag_vectors = pseudorandom_weak_vector(self.docvecs.vector_size, seed_string=' '.join(doc_words))
+        doctag_vectors = doctag_vectors.reshape(1, self.docvecs.vector_size)
 
-        doctags_lockf = np.ones(1, dtype=REAL)
+        doctag_locks = np.ones(1, dtype=REAL)
         doctag_indexes = [0]
         work = zeros(self.layer1_size, dtype=REAL)
         if not self.sg:
@@ -633,17 +628,17 @@ class Doc2Vec(Word2Vec):
             if self.sg:
                 train_document_dbow(
                     self, doc_words, doctag_indexes, alpha, work,
-                    learn_words=False, learn_hidden=False, doctag_vectors=doctag_vectors, doctags_lockf=doctags_lockf
+                    learn_words=False, learn_hidden=False, doctag_vectors=doctag_vectors, doctag_locks=doctag_locks
                 )
             elif self.dm_concat:
                 train_document_dm_concat(
                     self, doc_words, doctag_indexes, alpha, work, neu1,
-                    learn_words=False, learn_hidden=False, doctag_vectors=doctag_vectors, doctags_lockf=doctags_lockf
+                    learn_words=False, learn_hidden=False, doctag_vectors=doctag_vectors, doctag_locks=doctag_locks
                 )
             else:
                 train_document_dm(
                     self, doc_words, doctag_indexes, alpha, work, neu1,
-                    learn_words=False, learn_hidden=False, doctag_vectors=doctag_vectors, doctags_lockf=doctags_lockf
+                    learn_words=False, learn_hidden=False, doctag_vectors=doctag_vectors, doctag_locks=doctag_locks
                 )
             alpha -= alpha_delta
 
@@ -664,8 +659,8 @@ class Doc2Vec(Word2Vec):
 
         """
         if isinstance(tag, string_types + integer_types + (integer,)):
-            if tag not in self.wv:
-                return self.dv[tag]
+            if tag not in self.wv.vocab:
+                return self.docvecs[tag]
             return self.wv[tag]
         return vstack([self[i] for i in tag])
 
@@ -695,7 +690,7 @@ class Doc2Vec(Word2Vec):
                     segments.append('dm/m')
                 else:
                     segments.append('dm/s')
-        segments.append('d%d' % self.dv.vector_size)  # dimensions
+        segments.append('d%d' % self.docvecs.vector_size)  # dimensions
         if self.negative:
             segments.append('n%d' % self.negative)  # negative samples
         if self.hs:
@@ -734,20 +729,19 @@ class Doc2Vec(Word2Vec):
         # save word vectors
         if word_vec:
             if doctag_vec:
-                total_vec = len(self.wv) + len(self.dv)
+                total_vec = len(self.wv) + len(self.docvecs)
             self.wv.save_word2vec_format(fname, fvocab, binary, total_vec)
         # save document vectors
         if doctag_vec:
-            write_header = True
+            write_first_line = True
             append = False
             if word_vec:
                 # simply appending to existing file
-                write_header = False
+                write_first_line = False
                 append = True
-            self.dv.save_word2vec_format(
+            self.docvecs.save_word2vec_format(
                 fname, prefix=prefix, fvocab=fvocab, binary=binary,
-                write_header=write_header, append=append,
-                sort_attr='doc_count')
+                write_first_line=write_first_line, append=append)
 
     def init_sims(self, replace=False):
         """Pre-compute L2-normalized vectors.
@@ -759,7 +753,7 @@ class Doc2Vec(Word2Vec):
             continue training if call it with `replace=True`).
 
         """
-        self.dv.init_sims(replace=replace)
+        self.docvecs.init_sims(replace=replace)
 
     @classmethod
     def load(cls, *args, **kwargs):
@@ -815,7 +809,7 @@ class Doc2Vec(Word2Vec):
         """
         report = report or {}
         report['doctag_lookup'] = self.estimated_lookup_memory()
-        report['doctag_syn0'] = len(self.dv) * self.vector_size * dtype(REAL).itemsize
+        report['doctag_syn0'] = len(self.docvecs) * self.vector_size * dtype(REAL).itemsize
         return super(Doc2Vec, self).estimate_memory(vocab_size, report=report)
 
     def build_vocab(self, corpus_iterable=None, corpus_file=None, update=False, progress_per=10000,
@@ -858,7 +852,7 @@ class Doc2Vec(Word2Vec):
 
         """
         total_words, corpus_count = self.scan_vocab(
-            corpus_iterable=corpus_iterable, corpus_file=corpus_file,
+            corpus_iterable=corpus_iterable, corpus_file=corpus_file, docvecs=self.docvecs,
             progress_per=progress_per, trim_rule=trim_rule
         )
         self.corpus_count = corpus_count
@@ -980,17 +974,14 @@ class Doc2Vec(Word2Vec):
             # adjust indexes/list to account for range of pure-int keyed doctags
             for key in doctags_list:
                 doctags_lookup[key].index = doctags_lookup[key].index + max_rawint + 1
-            doctags_list = list(range(0, max_rawint + 1)) + doctags_list
+            doctags_list = ConcatList([range(0, max_rawint + 1), doctags_list])
 
-        self.dv.index_to_key = doctags_list
-        for t, dt in doctags_lookup.items():
-            self.dv.key_to_index[t] = dt.index
-            self.dv.set_vecattr(t, 'word_count', dt.word_count)
-            self.dv.set_vecattr(t, 'doc_count', dt.doc_count)
+        self.docvecs.map = doctags_lookup
+        self.docvecs.index2key = doctags_list
         self.raw_vocab = vocab
         return total_words, corpus_count
 
-    def scan_vocab(self, corpus_iterable=None, corpus_file=None, progress_per=10000, trim_rule=None):
+    def scan_vocab(self, corpus_iterable=None, corpus_file=None, docvecs=None, progress_per=10000, trim_rule=None):
         """Create the models Vocabulary: A mapping from unique words in the corpus to their frequency count.
 
         Parameters
@@ -1001,6 +992,8 @@ class Doc2Vec(Word2Vec):
             Path to a corpus file in :class:`~gensim.models.word2vec.LineSentence` format.
             You may use this argument instead of `documents` to get performance boost. Only one of `documents` or
             `corpus_file` arguments need to be passed (not both of them).
+        docvecs : list of :class:`~gensim.models.keyedvectors.KeyedVectors`
+            The vector representations of the documents in our corpus. Each of them has a size == `vector_size`.
         progress_per : int
             Progress will be logged every `progress_per` documents.
         trim_rule : function, optional
@@ -1031,7 +1024,7 @@ class Doc2Vec(Word2Vec):
 
         logger.info(
             "collected %i word types and %i unique tags from a corpus of %i examples and %i words",
-            len(self.raw_vocab), len(self.dv), corpus_count, total_words
+            len(self.raw_vocab), len(self.docvecs), corpus_count, total_words
         )
 
         return total_words, corpus_count
@@ -1067,10 +1060,12 @@ class Doc2Vec(Word2Vec):
 
 class Doc2VecVocab(utils.SaveLoad):
     """Obsolete class retained for now as load-compatibility state capture"""
+    pass
 
 
 class Doc2VecTrainables(utils.SaveLoad):
     """Obsolete class retained for now as load-compatibility state capture"""
+    pass
 
 
 class TaggedBrownCorpus(object):

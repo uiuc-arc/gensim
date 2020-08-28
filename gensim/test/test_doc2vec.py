@@ -90,17 +90,17 @@ class TestDoc2VecModel(unittest.TestCase):
         test_doc_word = get_tmpfile('gensim_doc2vec.dw')
         model.save_word2vec_format(test_doc_word, doctag_vec=True, word_vec=True, binary=False)
         binary_model_dv = keyedvectors.KeyedVectors.load_word2vec_format(test_doc_word, binary=False)
-        self.assertEqual(len(model.wv) + len(model.dv), len(binary_model_dv))
+        self.assertEqual(len(model.wv.vocab) + len(model.docvecs), len(binary_model_dv.vocab))
         # test saving document embedding only
         test_doc = get_tmpfile('gensim_doc2vec.d')
         model.save_word2vec_format(test_doc, doctag_vec=True, word_vec=False, binary=True)
         binary_model_dv = keyedvectors.KeyedVectors.load_word2vec_format(test_doc, binary=True)
-        self.assertEqual(len(model.dv), len(binary_model_dv))
+        self.assertEqual(len(model.docvecs), len(binary_model_dv.vocab))
         # test saving word embedding only
         test_word = get_tmpfile('gensim_doc2vec.w')
         model.save_word2vec_format(test_word, doctag_vec=False, word_vec=True, binary=True)
         binary_model_dv = keyedvectors.KeyedVectors.load_word2vec_format(test_word, binary=True)
-        self.assertEqual(len(model.wv), len(binary_model_dv))
+        self.assertEqual(len(model.wv.vocab), len(binary_model_dv.vocab))
 
     def obsolete_testLoadOldModel(self):
         """Test loading an old doc2vec model from indeterminate version"""
@@ -108,16 +108,16 @@ class TestDoc2VecModel(unittest.TestCase):
         model_file = 'doc2vec_old'  # which version?!?
         model = doc2vec.Doc2Vec.load(datapath(model_file))
         self.assertTrue(model.wv.vectors.shape == (3955, 100))
-        self.assertTrue(len(model.wv) == 3955)
+        self.assertTrue(len(model.wv.vocab) == 3955)
         self.assertTrue(len(model.wv.index2word) == 3955)
         self.assertIsNone(model.corpus_total_words)
-        self.assertTrue(model.syn1neg.shape == (len(model.wv), model.vector_size))
+        self.assertTrue(model.syn1neg.shape == (len(model.wv.vocab), model.vector_size))
         self.assertTrue(model.wv.vectors_lockf.shape == (3955, ))
         self.assertTrue(model.cum_table.shape == (3955, ))
 
-        self.assertTrue(model.dv.vectors.shape == (300, 100))
-        self.assertTrue(model.dv.vectors_lockf.shape == (300, ))
-        self.assertTrue(len(model.dv) == 300)
+        self.assertTrue(model.docvecs.vectors.shape == (300, 100))
+        self.assertTrue(model.docvecs.vectors_lockf.shape == (300, ))
+        self.assertTrue(len(model.docvecs) == 300)
 
         self.model_sanity(model)
 
@@ -128,15 +128,15 @@ class TestDoc2VecModel(unittest.TestCase):
         model_file = 'doc2vec_old_sep'
         model = doc2vec.Doc2Vec.load(datapath(model_file))
         self.assertTrue(model.wv.vectors.shape == (3955, 100))
-        self.assertTrue(len(model.wv) == 3955)
+        self.assertTrue(len(model.wv.vocab) == 3955)
         self.assertTrue(len(model.wv.index2word) == 3955)
         self.assertIsNone(model.corpus_total_words)
-        self.assertTrue(model.syn1neg.shape == (len(model.wv), model.vector_size))
+        self.assertTrue(model.syn1neg.shape == (len(model.wv.vocab), model.vector_size))
         self.assertTrue(model.wv.vectors_lockf.shape == (3955, ))
         self.assertTrue(model.cum_table.shape == (3955, ))
-        self.assertTrue(model.dv.vectors.shape == (300, 100))
-        self.assertTrue(model.dv.vectors_lockf.shape == (300, ))
-        self.assertTrue(len(model.dv) == 300)
+        self.assertTrue(model.docvecs.vectors.shape == (300, 100))
+        self.assertTrue(model.docvecs.vectors_lockf.shape == (300, ))
+        self.assertTrue(len(model.docvecs) == 300)
 
         self.model_sanity(model)
 
@@ -189,21 +189,21 @@ class TestDoc2VecModel(unittest.TestCase):
         logging.info("TESTING LOAD of %s Doc2Vec MODEL", old_version)
         saved_models_dir = datapath('old_d2v_models/d2v_{}.mdl')
         model = doc2vec.Doc2Vec.load(saved_models_dir.format(old_version))
-        self.assertTrue(len(model.wv) == 3)
+        self.assertTrue(len(model.wv.vocab) == 3)
         self.assertIsNone(model.corpus_total_words)
         self.assertTrue(model.wv.vectors.shape == (3, 4))
-        self.assertTrue(model.dv.vectors.shape == (2, 4))
-        self.assertTrue(len(model.dv) == 2)
+        self.assertTrue(model.docvecs.vectors.shape == (2, 4))
+        self.assertTrue(len(model.docvecs) == 2)
         # check if inferring vectors for new documents and similarity search works.
         doc0_inferred = model.infer_vector(list(DocsLeeCorpus())[0].words)
-        sims_to_infer = model.dv.most_similar([doc0_inferred], topn=len(model.dv))
+        sims_to_infer = model.docvecs.most_similar([doc0_inferred], topn=len(model.docvecs))
         self.assertTrue(sims_to_infer)
         # check if inferring vectors and similarity search works after saving and loading back the model
         tmpf = get_tmpfile('gensim_doc2vec.tst')
         model.save(tmpf)
         loaded_model = doc2vec.Doc2Vec.load(tmpf)
         doc0_inferred = loaded_model.infer_vector(list(DocsLeeCorpus())[0].words)
-        sims_to_infer = loaded_model.dv.most_similar([doc0_inferred], topn=len(loaded_model.dv))
+        sims_to_infer = loaded_model.docvecs.most_similar([doc0_inferred], topn=len(loaded_model.docvecs))
         self.assertTrue(sims_to_infer)
 
     def testDoc2vecTrainParameters(self):
@@ -330,9 +330,9 @@ class TestDoc2VecModel(unittest.TestCase):
 
         model = doc2vec.Doc2Vec(min_count=1)
         model.build_vocab(corpus)
-        self.assertEqual(len(model.dv.vectors), 300)
-        self.assertEqual(model.dv[0].shape, (100,))
-        self.assertEqual(model.dv[np.int64(0)].shape, (100,))
+        self.assertEqual(len(model.docvecs.vectors), 300)
+        self.assertEqual(model.docvecs[0].shape, (100,))
+        self.assertEqual(model.docvecs[np.int64(0)].shape, (100,))
         self.assertRaises(KeyError, model.__getitem__, '_*0')
 
     def test_missing_string_doctag(self):
@@ -343,7 +343,7 @@ class TestDoc2VecModel(unittest.TestCase):
 
         model = doc2vec.Doc2Vec(min_count=1)
         model.build_vocab(corpus)
-        self.assertRaises(KeyError, model.dv.__getitem__, 'not_a_tag')
+        self.assertRaises(KeyError, model.docvecs.__getitem__, 'not_a_tag')
 
     def test_string_doctags(self):
         """Test doc2vec doctag alternatives"""
@@ -354,17 +354,17 @@ class TestDoc2VecModel(unittest.TestCase):
         model = doc2vec.Doc2Vec(min_count=1)
         model.build_vocab(corpus)
 
-        self.assertEqual(len(model.dv.vectors), 300)
-        self.assertEqual(model.dv[0].shape, (100,))
-        self.assertEqual(model.dv['_*0'].shape, (100,))
-        self.assertTrue(all(model.dv['_*0'] == model.dv[0]))
-        self.assertTrue(max(model.dv.key_to_index.values()) < len(model.dv.index_to_key))
+        self.assertEqual(len(model.docvecs.vectors), 300)
+        self.assertEqual(model.docvecs[0].shape, (100,))
+        self.assertEqual(model.docvecs['_*0'].shape, (100,))
+        self.assertTrue(all(model.docvecs['_*0'] == model.docvecs[0]))
+        self.assertTrue(max(d.index for d in model.docvecs.map.values()) < len(model.docvecs.index2key))
         self.assertLess(
-            max(model.dv.get_index(str_key) for str_key in model.dv.key_to_index.keys()),
-            len(model.dv.vectors)
+            max(model.docvecs.get_index(str_key) for str_key in model.docvecs.map.keys()),
+            len(model.docvecs.vectors)
         )
-        # verify dv.most_similar() returns string doctags rather than indexes
-        self.assertEqual(model.dv.index_to_key[0], model.dv.most_similar([model.dv[0]])[0][0])
+        # verify docvecs.most_similar() returns string doctags rather than indexes
+        self.assertEqual(model.docvecs.index2key[0], model.docvecs.most_similar([model.docvecs[0]])[0][0])
 
     def test_empty_errors(self):
         # no input => "RuntimeError: you must first build vocabulary before training the model"
@@ -390,24 +390,22 @@ class TestDoc2VecModel(unittest.TestCase):
         """Any non-trivial model on DocsLeeCorpus can pass these sanity checks"""
         fire1 = 0  # doc 0 sydney fires
         fire2 = np.int64(8)  # doc 8 sydney fires
-        alt1 = 29  # doc 29 palestine
+        tennis1 = 6  # doc 6 tennis
 
         # inferred vector should be top10 close to bulk-trained one
         doc0_inferred = model.infer_vector(list(DocsLeeCorpus())[0].words)
-        sims_to_infer = model.dv.most_similar([doc0_inferred], topn=len(model.dv))
-        sims_ids = [docid for docid, sim in sims_to_infer]
-        self.assertTrue(fire1 in sims_ids, "{0} not found in {1}".format(fire1, sims_to_infer))
-        f_rank = sims_ids.index(fire1)
+        sims_to_infer = model.docvecs.most_similar([doc0_inferred], topn=len(model.docvecs))
+        f_rank = [docid for docid, sim in sims_to_infer].index(fire1)
         self.assertLess(f_rank, 10)
 
         # fire2 should be top30 close to fire1
-        sims = model.dv.most_similar(fire1, topn=len(model.dv))
+        sims = model.docvecs.most_similar(fire1, topn=len(model.docvecs))
         f2_rank = [docid for docid, sim in sims].index(fire2)
         self.assertLess(f2_rank, 30)
 
         # same sims should appear in lookup by vec as by index
-        doc0_vec = model.dv[fire1]
-        sims2 = model.dv.most_similar(positive=[doc0_vec], topn=21)
+        doc0_vec = model.docvecs[fire1]
+        sims2 = model.docvecs.most_similar(positive=[doc0_vec], topn=21)
         sims2 = [(id, sim) for id, sim in sims2 if id != fire1]  # ignore the doc itself
         sims = sims[:20]
         self.assertEqual(list(zip(*sims))[0], list(zip(*sims2))[0])  # same doc ids
@@ -415,17 +413,16 @@ class TestDoc2VecModel(unittest.TestCase):
 
         # sim results should be in clip range if given
         clip_sims = \
-            model.dv.most_similar(fire1, clip_start=len(model.dv) // 2, clip_end=len(model.dv) * 2 // 3)
+            model.docvecs.most_similar(fire1, clip_start=len(model.docvecs) // 2, clip_end=len(model.docvecs) * 2 // 3)
         sims_doc_id = [docid for docid, sim in clip_sims]
         for s_id in sims_doc_id:
-            self.assertTrue(len(model.dv) // 2 <= s_id <= len(model.dv) * 2 // 3)
+            self.assertTrue(len(model.docvecs) // 2 <= s_id <= len(model.docvecs) * 2 // 3)
 
-        # fire docs should be closer than fire-alt
-        self.assertLess(model.dv.similarity(fire1, alt1), model.dv.similarity(fire1, fire2))
-        self.assertLess(model.dv.similarity(fire2, alt1), model.dv.similarity(fire1, fire2))
+        # tennis doc should be out-of-place among fire news
+        self.assertEqual(model.docvecs.doesnt_match([fire1, tennis1, fire2]), tennis1)
 
-        # alt doc should be out-of-place among fire news
-        self.assertEqual(model.dv.doesnt_match([fire1, alt1, fire2]), alt1)
+        # fire docs should be closer than fire-tennis
+        self.assertTrue(model.docvecs.similarity(fire1, fire2) > model.docvecs.similarity(fire1, tennis1))
 
         # keep training after save
         if keep_training:
@@ -439,7 +436,7 @@ class TestDoc2VecModel(unittest.TestCase):
         corpus = DocsLeeCorpus()
         model = doc2vec.Doc2Vec(vector_size=100, min_count=2, epochs=20, workers=1)
         model.build_vocab(corpus)
-        self.assertEqual(model.dv.vectors.shape, (300, 100))
+        self.assertEqual(model.docvecs.vectors.shape, (300, 100))
         model.train(corpus, total_examples=model.corpus_count, epochs=model.epochs)
 
         self.model_sanity(model)
@@ -456,7 +453,7 @@ class TestDoc2VecModel(unittest.TestCase):
 
             model = doc2vec.Doc2Vec(vector_size=100, min_count=2, epochs=20, workers=1)
             model.build_vocab(corpus_file=corpus_file)
-            self.assertEqual(model.dv.vectors.shape, (300, 100))
+            self.assertEqual(model.docvecs.vectors.shape, (300, 100))
             model.train(corpus_file=corpus_file, total_words=model.corpus_total_words, epochs=model.epochs)
 
             self.model_sanity(model)
@@ -536,7 +533,9 @@ class TestDoc2VecModel(unittest.TestCase):
 
     def test_dbow_neg(self):
         """Test DBOW doc2vec training."""
-        model = doc2vec.Doc2Vec(list_corpus, vector_size=16, dm=0, hs=0, negative=5, min_count=2, epochs=40)
+        model = doc2vec.Doc2Vec(
+            list_corpus, dm=0, vector_size=24, hs=0, negative=10, min_count=2,
+            epochs=20)
         self.model_sanity(model)
 
     @unittest.skipIf(os.name == 'nt' and six.PY2, "corpus_file training is not supported on Windows + Py27")
@@ -544,7 +543,9 @@ class TestDoc2VecModel(unittest.TestCase):
         """Test DBOW doc2vec training."""
         with temporary_file(get_tmpfile('gensim_doc2vec.tst')) as corpus_file:
             save_lee_corpus_as_line_sentence(corpus_file)
-            model = doc2vec.Doc2Vec(list_corpus, vector_size=16, dm=0, hs=0, negative=5, min_count=2, epochs=40)
+            model = doc2vec.Doc2Vec(
+                list_corpus, dm=0, vector_size=24, hs=0, negative=10, min_count=2,
+                epochs=20)
             self.model_sanity(model)
 
     def test_dmm_neg(self):
@@ -645,21 +646,20 @@ class TestDoc2VecModel(unittest.TestCase):
         mixed_tag_corpus = [doc2vec.TaggedDocument(words, [i, words[0]]) for i, words in enumerate(raw_sentences)]
         model = doc2vec.Doc2Vec()
         model.build_vocab(mixed_tag_corpus)
-        expected_length = len(sentences) + len(model.dv.key_to_index)  # 9 sentences, 7 unique first tokens
-        self.assertEqual(len(model.dv.vectors), expected_length)
-        # TODO: test saving in word2vec format
+        expected_length = len(sentences) + len(model.docvecs.map)  # 9 sentences, 7 unique first tokens
+        self.assertEqual(len(model.docvecs.vectors), expected_length)
 
     def models_equal(self, model, model2):
         # check words/hidden-weights
-        self.assertEqual(len(model.wv), len(model2.wv))
+        self.assertEqual(len(model.wv.vocab), len(model2.wv.vocab))
         self.assertTrue(np.allclose(model.wv.vectors, model2.wv.vectors))
         if model.hs:
             self.assertTrue(np.allclose(model.syn1, model2.syn1))
         if model.negative:
             self.assertTrue(np.allclose(model.syn1neg, model2.syn1neg))
         # check docvecs
-        self.assertEqual(len(model.dv), len(model2.dv))
-        self.assertEqual(len(model.dv.index_to_key), len(model2.dv.index_to_key))
+        self.assertEqual(len(model.docvecs.map), len(model2.docvecs.map))
+        self.assertEqual(len(model.docvecs.index2key), len(model2.docvecs.index2key))
 
     def test_word_vec_non_writeable(self):
         model = keyedvectors.KeyedVectors.load_word2vec_format(datapath('word2vec_pre_kv_c'))
@@ -668,17 +668,17 @@ class TestDoc2VecModel(unittest.TestCase):
             vector *= 0
 
     @log_capture()
-    def testBuildVocabWarning(self, loglines):
+    def testBuildVocabWarning(self, l):
         """Test if logger warning is raised on non-ideal input to a doc2vec model"""
         raw_sentences = ['human', 'machine']
         sentences = [doc2vec.TaggedDocument(words, [i]) for i, words in enumerate(raw_sentences)]
         model = doc2vec.Doc2Vec()
         model.build_vocab(sentences)
         warning = "Each 'words' should be a list of words (usually unicode strings)."
-        self.assertTrue(warning in str(loglines))
+        self.assertTrue(warning in str(l))
 
     @log_capture()
-    def testTrainWarning(self, loglines):
+    def testTrainWarning(self, l):
         """Test if warning is raised if alpha rises during subsequent calls to train()"""
         raw_sentences = [['human'],
                          ['graph', 'trees']]
@@ -692,7 +692,7 @@ class TestDoc2VecModel(unittest.TestCase):
             if epoch == 5:
                 model.alpha += 0.05
         warning = "Effective 'alpha' higher than previous training cycles"
-        self.assertTrue(warning in str(loglines))
+        self.assertTrue(warning in str(l))
 
     def testLoadOnClassError(self):
         """Test if exception is raised when loading doc2vec model on instance"""
@@ -719,8 +719,8 @@ class ConcatenatedDoc2Vec(object):
 
     def __init__(self, models):
         self.models = models
-        if hasattr(models[0], 'dv'):
-            self.dv = ConcatenatedDocvecs([model.dv for model in models])
+        if hasattr(models[0], 'docvecs'):
+            self.docvecs = ConcatenatedDocvecs([model.docvecs for model in models])
 
     def __getitem__(self, token):
         return np.concatenate([model[token] for model in self.models])
@@ -838,4 +838,4 @@ def read_su_sentiment_rotten_tomatoes(dirname, lowercase=True):
 
 if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.DEBUG)
-    unittest.main(module='gensim.test.test_doc2vec')
+    unittest.main()
