@@ -534,7 +534,7 @@ class TestDoc2VecModel(unittest.TestCase):
 
     def test_dbow_neg(self):
         """Test DBOW doc2vec training."""
-        model = doc2vec.Doc2Vec(list_corpus, vector_size=16, dm=0, hs=0, negative=5, min_count=2, epochs=40)
+        model = doc2vec.Doc2Vec(list_corpus, vector_size=16, dm=0, hs=0, negative=5, min_count=2, epochs=7)
         self.model_sanity(model)
 
     @unittest.skipIf(os.name == 'nt' and six.PY2, "corpus_file training is not supported on Windows + Py27")

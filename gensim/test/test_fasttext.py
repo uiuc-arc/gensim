@@ -480,7 +480,7 @@ class TestFastTextModel(unittest.TestCase):
 
         model_gensim = FT_gensim(
             vector_size=48, sg=1, cbow_mean=1, alpha=0.025, window=5, hs=1, negative=0,
-            min_count=5, epochs=5, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
+            min_count=5, epochs=1, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
             sorted_vocab=1, workers=1, min_alpha=0.0, bucket=BUCKET)
 
         lee_data = LineSentence(datapath('lee_background.cor'))
@@ -542,7 +542,7 @@ class TestFastTextModel(unittest.TestCase):
 
         model_gensim = FT_gensim(
             vector_size=48, sg=0, cbow_mean=1, alpha=0.05, window=5, hs=0, negative=5,
-            min_count=5, epochs=5, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
+            min_count=5, epochs=1, batch_words=1000, word_ngrams=1, sample=1e-3, min_n=3, max_n=6,
             sorted_vocab=1, workers=1, min_alpha=0.0, bucket=BUCKET)
 
         lee_data = LineSentence(datapath('lee_background.cor'))
